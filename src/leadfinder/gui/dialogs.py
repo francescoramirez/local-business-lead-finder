@@ -72,6 +72,8 @@ class ActivityDialog(QDialog):
         for key, label in ACTIVITY_TYPE_LABELS.items():
             if key == ActivityType.DISCOVERED.value:
                 continue
+            if key == ActivityType.SALES_PREP_SAVED.value:
+                continue
             self.activity_type.addItem(label, key)
         self.method = QComboBox()
         self.method.addItem("—", "")

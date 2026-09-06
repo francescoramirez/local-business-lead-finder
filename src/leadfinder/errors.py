@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-_API_KEY_PATTERN = re.compile(r"AIza[0-9A-Za-z_-]{10,}")
+_API_KEY_PATTERN = re.compile(r"(?:AIza|gsk_)[0-9A-Za-z_-]{10,}")
 _BEARER_PATTERN = re.compile(r"(?i)(api[_-]?key|authorization|x-goog-api-key)\s*[:=]\s*\S+")
 
 
@@ -56,4 +56,34 @@ class BackupError(LeadFinderError):
 
 
 class GuiDependencyError(LeadFinderError):
+    pass
+
+
+class AINotConfiguredError(LeadFinderError):
+    pass
+
+
+class AIAuthError(LeadFinderError):
+    pass
+
+
+class AIRateLimitError(LeadFinderError):
+    pass
+
+
+class AITimeoutError(LeadFinderError):
+    pass
+
+
+class AINetworkError(LeadFinderError):
+    pass
+
+
+class AIResponseValidationError(LeadFinderError):
+    pass
+
+
+class AIRequestError(LeadFinderError):
+    """Permanent provider rejection such as HTTP 400/404. Do not retry."""
+
     pass

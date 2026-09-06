@@ -12,6 +12,11 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from leadfinder.application.service import LeadService  # noqa: E402
+from leadfinder.errors import (  # noqa: E402
+    AIAuthError,
+    AIResponseValidationError,
+    AITimeoutError,
+)
 from leadfinder.gui.main_window import MainWindow  # noqa: E402
 from leadfinder.normalize import place_to_lead  # noqa: E402
 from leadfinder.scoring import score_lead  # noqa: E402
@@ -163,3 +168,105 @@ def test_pipeline_dashboard_and_follow_up_flow(qapp, tmp_path: Path) -> None:
     assert state.contact_status == "contacted"
     assert state.tags == "priority"
     restored.close()
+
+
+class _FakePrep:
+    def __init__(self, result=None, error: Exception | None = None) -> None:
+        self.calls = 0
+        self.error = error
+        from leadfinder.ai.models import SalesPrepResult
+
+        self.result = result or SalesPrepResult(
+            opportunity_summary="Strong local activity with 238 reviews.",
+            pitch_angle="Complement Instagram with a simple site.",
+            value_props=["Direct inquiries"],
+            opening_message="Hola, vi su presencia en Instagram.",
+            talking_points=["Own the web presence"],
+            objections=["Instagram is enough"],
+            cautions=["Do not promise rankings"],
+            next_step="Review and contact manually.",
+            observed=["Social-only presence", "238 reviews"],
+        )
+
+    def generate_sales_prep(self, request):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
+
+def _wait_prep(window, qapp) -> None:
+    worker = window._prep_worker
+    assert worker is not None
+    assert worker.wait(5000)
+    qapp.processEvents()
+
+
+def test_sales_prep_is_manual_copy_save_and_errors(qapp, tmp_path: Path) -> None:
+    store = LocalLeadStore(tmp_path / "leads.db")
+    fake = _FakePrep()
+    service = LeadService(store, ai_provider=fake)
+    window = MainWindow(service)
+    item = _managed(store, "ChIJ_SYNTHETIC_401", "Cafe Example")
+    item.lead.website_status = "social_only"
+    item.lead.rating = 4.6
+    item.lead.user_rating_count = 238
+    window.model.set_leads([item])
+    window._update_empty_state()
+    window.table.selectRow(0)
+    window._show_lead(item)
+    window.detail_tabs.setCurrentIndex(1)
+    assert window.detail_tabs.tabText(1) == "Sales Prep"
+    assert fake.calls == 0
+    assert window.sales_prep.generate_count == 0
+    assert window.sales_prep.summary.toPlainText() == ""
+
+    window.sales_prep.generate_btn.click()
+    _wait_prep(window, qapp)
+    assert fake.calls == 1
+    assert "238" in window.sales_prep.summary.toPlainText()
+    assert "Suggested draft" not in window.sales_prep.opener.toPlainText()
+    assert window.sales_prep.opener.toPlainText().startswith("Hola")
+
+    window._copy_opener()
+    clipboard = qapp.clipboard()
+    assert clipboard is not None
+    assert clipboard.text() == window.sales_prep.opener.toPlainText()
+
+    window.sales_prep.regenerate_btn.click()
+    _wait_prep(window, qapp)
+    assert fake.calls == 2
+    assert window.sales_prep.generate_count == 2
+
+    window.sales_prep.save_notes_btn.click()
+    assert "AI sales prep" in window.notes.toPlainText()
+    assert "Sales prep saved" in window.detail_activity.toPlainText()
+
+    window.service.ai_provider = _FakePrep(error=AITimeoutError("AI provider timed out."))
+    window.start_sales_prep()
+    _wait_prep(window, qapp)
+    assert "timed out" in window.sales_prep.busy.text().lower()
+
+    window.service.ai_provider = _FakePrep(error=AIAuthError("AI API key invalid."))
+    window.start_sales_prep()
+    _wait_prep(window, qapp)
+    assert "invalid" in window.sales_prep.busy.text().lower()
+
+    window.service.ai_provider = _FakePrep(
+        error=AIResponseValidationError("AI returned an invalid structured response.")
+    )
+    window.start_sales_prep()
+    _wait_prep(window, qapp)
+    assert "invalid structured" in window.sales_prep.busy.text().lower()
+
+    window.close()
+    restored = LocalLeadStore(tmp_path / "leads.db")
+    state = restored.get("ChIJ_SYNTHETIC_401")
+    assert state is not None
+    assert "AI sales prep" in state.notes
+    for key in window.settings.allKeys():
+        value = str(window.settings.value(key))
+        assert "GROQ_API_KEY" not in key
+        assert "gsk_" not in value.lower()
+    restored.close()
+

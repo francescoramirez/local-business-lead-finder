@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QStatusBar,
@@ -30,6 +31,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from leadfinder.ai.models import DEFAULT_OUTPUT_LANGUAGE, SalesPrepResult
+from leadfinder.ai.provider import ai_configured, groq_model
 from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
 from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError
@@ -45,7 +48,8 @@ from leadfinder.gui.lead_model import (
 )
 from leadfinder.gui.pipeline_page import PipelinePage
 from leadfinder.gui.prospects_page import ProspectsPage
-from leadfinder.gui.workers import AnalyzeWorker, SearchWorker
+from leadfinder.gui.sales_prep import SalesPrepPanel
+from leadfinder.gui.workers import AnalyzeWorker, SalesPrepWorker, SearchWorker
 from leadfinder.models import (
     CONTACT_STATUS_LABELS,
     CONTACT_STATUSES,
@@ -66,6 +70,8 @@ class MainWindow(QMainWindow):
         self.service = service or LeadService()
         self.settings = QSettings("LeadFinder", "LeadFinder")
         self._worker: SearchWorker | AnalyzeWorker | None = None
+        self._prep_worker: SalesPrepWorker | None = None
+        self._prep_cache: dict[str, SalesPrepResult] = {}
         self._selected: ManagedLead | None = None
         self._updating_details = False
         self._notes_timer = QTimer(self)
@@ -151,6 +157,13 @@ class MainWindow(QMainWindow):
         search_layout.addLayout(buttons)
         search_layout.addStretch()
 
+        self.ai_status = QLabel("")
+        self.ai_status.setObjectName("hint")
+        self.ai_status.setWordWrap(True)
+        ai_box = QGroupBox("AI")
+        ai_layout = QVBoxLayout(ai_box)
+        ai_layout.addWidget(self.ai_status)
+
         self.summary = QPlainTextEdit()
         self.summary.setReadOnly(True)
         self.summary.setPlaceholderText("Run Dry Run to preview cost, or Search to load leads.")
@@ -170,6 +183,7 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(search_box, 3)
+        left_layout.addWidget(ai_box, 0)
         left_layout.addWidget(summary_box, 2)
         left_layout.addWidget(self.progress)
         left_layout.addWidget(self.progress_label)
@@ -276,8 +290,8 @@ class MainWindow(QMainWindow):
         self.detail_activity = QPlainTextEdit()
         self.detail_activity.setReadOnly(True)
         self.detail_activity.setMaximumHeight(140)
-        details = QGroupBox("Lead details")
-        details_layout = QVBoxLayout(details)
+        overview = QWidget()
+        details_layout = QVBoxLayout(overview)
         details_layout.addWidget(QLabel("Overview"))
         details_layout.addWidget(self.detail_name)
         details_layout.addWidget(self.detail_score)
@@ -307,6 +321,16 @@ class MainWindow(QMainWindow):
         details_layout.addWidget(QLabel("Activity"))
         details_layout.addWidget(self.detail_activity)
 
+        self.sales_prep = SalesPrepPanel()
+        prep_scroll = QScrollArea()
+        prep_scroll.setWidgetResizable(True)
+        prep_scroll.setWidget(self.sales_prep)
+        self.detail_tabs = QTabWidget()
+        self.detail_tabs.addTab(overview, "Overview")
+        self.detail_tabs.addTab(prep_scroll, "Sales Prep")
+        details = QGroupBox("Lead details")
+        details_outer = QVBoxLayout(details)
+        details_outer.addWidget(self.detail_tabs)
         right_split = QSplitter(Qt.Orientation.Vertical)
         right_split.addWidget(table_wrap)
         right_split.addWidget(details)
@@ -395,6 +419,29 @@ class MainWindow(QMainWindow):
         self.pipeline_page.status_dropped.connect(self._on_pipeline_drop)
         self.pipeline_page.card_selected.connect(self._select_place)
         self.prospects_page.selected.connect(self._select_place)
+        self.sales_prep.generate_btn.clicked.connect(self.start_sales_prep)
+        self.sales_prep.regenerate_btn.clicked.connect(self.start_sales_prep)
+        self.sales_prep.copy_opener_btn.clicked.connect(self._copy_opener)
+        self.sales_prep.copy_points_btn.clicked.connect(self._copy_talking_points)
+        self.sales_prep.copy_full_btn.clicked.connect(self._copy_full_prep)
+        self.sales_prep.save_notes_btn.clicked.connect(self._save_sales_prep_notes)
+
+    def _refresh_ai_status(self) -> None:
+        model = groq_model(self.sales_prep.model_value())
+        if ai_configured():
+            text = (
+                f"AI Provider: Groq\nModel: {model}\nStatus: Configured\n\n"
+                "Set GROQ_API_KEY in your environment. The key is never shown or saved here."
+            )
+        else:
+            text = (
+                "AI Provider: Groq\n"
+                f"Model: {model}\n"
+                "Status: Not configured\n\n"
+                "Set GROQ_API_KEY in your environment"
+            )
+        self.ai_status.setText(text)
+        self.sales_prep.refresh_status()
 
     def current_config(self) -> SearchConfig:
         location = self.location.text().strip()
@@ -641,6 +688,11 @@ class MainWindow(QMainWindow):
         self.contact_status.setCurrentIndex(max(index, 0))
         self.notes.setPlainText(item.notes)
         self._render_activity(item.lead.place_id)
+        cached = self._prep_cache.get(item.lead.place_id)
+        if cached is not None:
+            self.sales_prep.show_result(cached)
+        else:
+            self.sales_prep.clear_output()
         self._updating_details = False
 
     def _on_status_changed(self) -> None:
@@ -716,6 +768,59 @@ class MainWindow(QMainWindow):
         self.model.update_row(updated)
         self._show_lead(updated)
         self._refresh_secondary()
+
+    def start_sales_prep(self) -> None:
+        if self._selected is None:
+            QMessageBox.information(
+                self,
+                "AI Sales Prep",
+                "Select a prospect first. Generation is never run for the whole list.",
+            )
+            return
+        if self._prep_worker and self._prep_worker.isRunning():
+            return
+        self.sales_prep.generate_count += 1
+        self.sales_prep.set_busy(True)
+        self._refresh_ai_status()
+        self._prep_worker = SalesPrepWorker(
+            self.service,
+            self._selected,
+            language=self.sales_prep.language_value(),
+            model=self.sales_prep.model_value(),
+            parent=self,
+        )
+        self._prep_worker.succeeded.connect(self._on_sales_prep_done)
+        self._prep_worker.failed.connect(self._on_sales_prep_failed)
+        self._prep_worker.start()
+
+    def _on_sales_prep_done(self, result: SalesPrepResult) -> None:
+        if self._selected is not None:
+            self._prep_cache[self._selected.lead.place_id] = result
+        self.sales_prep.show_result(result)
+        self.statusBar().showMessage("Sales prep ready. Review before any contact.")
+
+    def _on_sales_prep_failed(self, message: str) -> None:
+        self.sales_prep.show_error(message)
+
+    def _copy_opener(self) -> None:
+        self.sales_prep.copy_text(self.sales_prep.opener.toPlainText())
+
+    def _copy_talking_points(self) -> None:
+        self.sales_prep.copy_text(self.sales_prep.points.toPlainText())
+
+    def _copy_full_prep(self) -> None:
+        self.sales_prep.copy_text(self.sales_prep.current_full_text())
+
+    def _save_sales_prep_notes(self) -> None:
+        if self._selected is None or self.sales_prep.result is None:
+            return
+        result = self.sales_prep.result
+        result.opening_message = self.sales_prep.opener.toPlainText()
+        updated = self.service.save_sales_prep(self._selected, result)
+        self._selected = updated
+        self.model.update_row(updated)
+        self._show_lead(updated)
+        self.statusBar().showMessage("Saved sales prep to notes.")
 
     def _open_website(self) -> None:
         if self._selected and self._selected.lead.website:
@@ -832,6 +937,12 @@ class MainWindow(QMainWindow):
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
+        language = str(self.settings.value("ai_output_language", DEFAULT_OUTPUT_LANGUAGE))
+        lang_index = self.sales_prep.language.findData(language)
+        if lang_index >= 0:
+            self.sales_prep.language.setCurrentIndex(lang_index)
+        self.sales_prep.model.setText(str(self.settings.value("ai_model", "")))
+        self._refresh_ai_status()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_notes()
@@ -842,6 +953,10 @@ class MainWindow(QMainWindow):
         self.settings.setValue("coverage", self.coverage.currentText())
         self.settings.setValue("fields", self.fields.currentText())
         self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("ai_output_language", self.sales_prep.language_value())
+        self.settings.setValue("ai_model", self.sales_prep.model_value())
+        if self._prep_worker and self._prep_worker.isRunning():
+            self._prep_worker.wait(2000)
         if self._worker and self._worker.isRunning():
             self._worker.request_cancel()
             self._worker.wait(2000)

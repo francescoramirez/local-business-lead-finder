@@ -4,7 +4,7 @@ Cost-aware Python CLI and desktop app for discovering and prioritizing local bus
 
 [![CI](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml)
 
-Turn a business type and a location into a ranked outreach list: Google Places API (New) → normalize → filter → score → digital presence → CSV/JSON. Built for web agencies looking for local businesses with weak or missing websites.
+Turn a business type and a location into a ranked outreach list: Google Places API (New) → normalize → filter → score → digital presence → optional AI sales prep → CSV/JSON. Built for web agencies looking for local businesses with weak or missing websites.
 
 Independent project. **Not affiliated with Google.**
 
@@ -64,10 +64,10 @@ leadfinder presets
 
 ## Desktop GUI
 
-The same search engine is available as a small CRM-style desktop app: configure a search, qualify digital presence, track follow-ups, and export.
+The same search engine is available as a small CRM-style desktop app: configure a search, qualify digital presence, prepare a draft pitch for one selected prospect, track follow-ups, and export.
 
 ```text
-Discover → Qualify → Contact → Follow-up → Won
+Discover → Qualify → Select prospect → AI Sales Prep → Review → Manual contact → Track outcome
 ```
 
 ```bash
@@ -93,9 +93,9 @@ Statuses: New → Contacted → Interested → Follow-up → Won, plus exits Rej
 
 Each prospect can have a next follow-up (UTC in storage, local time in the GUI). Overdue means the follow-up time has passed and the status is not Won / Rejected / Do not contact.
 
-Activity history is recorded locally when you change status, schedule a follow-up, or add a contact attempt. Nothing is sent automatically — no email, WhatsApp, or DMs.
+Activity history is recorded locally when you change status, schedule a follow-up, add a contact attempt, or save AI sales prep into notes. Nothing is sent automatically — no email, WhatsApp, or DMs.
 
-The GUI has Search, Pipeline, Prospects, and Dashboard tabs. Dashboard shows pipeline counts, a simple funnel, and recent search metadata (preset, location, lead counts) without storing Places results.
+The GUI has Search, Pipeline, Prospects, and Dashboard tabs. Lead details include Overview and Sales Prep. Dashboard shows pipeline counts, a simple funnel, and recent search metadata (preset, location, lead counts) without storing Places results.
 
 ```bash
 leadfinder stats
@@ -123,6 +123,56 @@ leadfinder search --business cafe --location "Mar del Plata" --country AR --anal
 
 Each lead gets a **lead score** (existing commercial signals) and an **opportunity score** (commercial + digital-opportunity points) with a High / Medium / Low label.
 
+## AI-assisted sales prep
+
+Optional. Discovery, scoring, and pipeline tracking work with no AI key.
+
+When you explicitly select one prospect and click **Generate sales prep**, LeadFinder sends a small set of already-visible commercial signals to the configured provider (Groq) and returns a structured draft for you to review. It does not send messages, open WhatsApp, mail anyone, change pipeline status, or run against the whole list.
+
+```text
+AI sales prep is not configured.
+
+Set GROQ_API_KEY to enable it.
+```
+
+```env
+GROQ_API_KEY=your-groq-api-key-here
+# optional
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+The key is read from the environment / `.env` only. It is not a CLI flag, not shown in Settings, and not stored in SQLite or QSettings. Model name and output language (Spanish by default, or English) may be saved locally.
+
+**Sent (selected lead only, after Generate):** business name, type, general location/region/country, rating, review count, digital-presence category, qualification signals, opportunity score/level, contact status, notes, tags, website-status code, operational flag, requested language.
+
+**Not sent:** API keys, phone numbers, Place IDs, websites/URLs, Google payloads, HTML, other leads, logs.
+
+The model sees structured signals, not a site scrape. Output is JSON (`sales_prep_v1`): opportunity summary, pitch angle, value props, suggested opener (a draft), talking points, objections, cautions, next step, observed vs suggestion, information gaps.
+
+Example (synthetic):
+
+```text
+Observed
+• Social-only presence
+• 238 reviews
+• Operational
+
+Opportunity summary
+Strong local activity with 238 reviews, but Instagram appears to be the primary web presence.
+
+Suggested angle
+Position a standalone site as a complement to Instagram, focused on menu visibility and direct inquiries.
+
+Suggested draft
+Hola, vi que tienen una presencia bastante activa en Instagram...
+
+Cautions
+• Do not frame their current presence as bad
+• Do not promise SEO rankings
+```
+
+Copy opener / talking points / full prep and **Save to notes** are manual. Saving notes records `sales_prep_saved`. Generations are not stored unless you save.
+
 ## How it works
 
 ```text
@@ -132,7 +182,7 @@ PySide6 GUI ───────┤
                    ↓
           Application / Services
                    ↓
-        Search / Lead Engine
+        Search / Lead Engine  +  optional AI sales prep (Groq)
                    ↓
  Google Places + optional digital-presence check
                    ↓
@@ -163,6 +213,7 @@ CSV / JSON
 - Country / region / locality queries (Buenos Aires is an optional geo preset, not a global assumption)
 - No persistent cache of Places content or HTML; Place IDs and user workflow metadata may be stored locally
 - Local prospect pipeline with SQLite migrations, follow-ups, and activity history
+- Optional Groq sales-prep copilot behind a provider interface, user-triggered, structured JSON
 - Desktop GUI on the same engine, with cooperative cancel and offscreen tests
 - HTTP-mocked pytest suite; Ruff and mypy in GitHub Actions without secrets
 
@@ -195,6 +246,8 @@ GOOGLE_MAPS_API_KEY=your-places-api-key-here
 
 `GOOGLE_PLACES_API_KEY` is also accepted. Keys are not taken as CLI flags.
 
+Optional AI Sales Prep uses `GROQ_API_KEY` the same way. Discovery does not require it.
+
 ## Scoring, cost, and output
 
 Default field profile is `enterprise` because `websiteUri` is required to find missing websites. Dropping phone numbers does not lower the SKU if `websiteUri` is still requested.
@@ -214,7 +267,7 @@ Permanently closed places are omitted by default. Exports go to `output/leads-<t
 
 ## Compliance
 
-This tool is independent software and is not a Google product. Place data comes from Google Maps / Places and is subject to [Google’s Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) and Maps Platform terms. Place IDs, contact status, notes, tags, follow-ups, activity logs, and search-run metadata may be stored locally. Full Places records are not cached to skip billing. You are responsible for complying with applicable rules when contacting businesses.
+This tool is independent software and is not a Google product. Place data comes from Google Maps / Places and is subject to [Google’s Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) and Maps Platform terms. Place IDs, contact status, notes, tags, follow-ups, activity logs, and search-run metadata may be stored locally. Full Places records are not cached to skip billing. If you use AI Sales Prep, commercial fields of the selected lead are sent to Groq only after you click Generate. You are responsible for complying with applicable rules when contacting businesses.
 
 ## License
 

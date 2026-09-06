@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from leadfinder.application.service import LeadService
+from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
 from leadfinder.digital_presence import PresenceAnalyzer
 from leadfinder.errors import LeadFinderError
@@ -45,12 +45,8 @@ class SearchWorker(QThread):
             )
             self.succeeded.emit(report, managed)
         except LeadFinderError as error:
-            from leadfinder.application.service import friendly_error
-
             self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            from leadfinder.application.service import friendly_error
-
             self.failed.emit(friendly_error(error))
 
     def _on_progress(self, event: SearchProgress) -> None:
@@ -89,13 +85,42 @@ class AnalyzeWorker(QThread):
             )
             self.succeeded.emit(updated)
         except LeadFinderError as error:
-            from leadfinder.application.service import friendly_error
-
             self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            from leadfinder.application.service import friendly_error
-
             self.failed.emit(friendly_error(error))
 
     def _on_progress(self, event: SearchProgress) -> None:
         self.progressed.emit(event)
+
+
+class SalesPrepWorker(QThread):
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        service: LeadService,
+        item: ManagedLead,
+        *,
+        language: str,
+        model: str = "",
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._item = item
+        self._language = language
+        self._model = model
+
+    def run(self) -> None:
+        try:
+            result = self._service.prepare_sales(
+                self._item,
+                language=self._language,
+                model=self._model,
+            )
+            self.succeeded.emit(result)
+        except LeadFinderError as error:
+            self.failed.emit(friendly_error(error))
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(friendly_error(error))

@@ -3,9 +3,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from leadfinder.ai.models import SalesPrepResult
+from leadfinder.ai.provider import AIProvider
+from leadfinder.ai.service import generate_sales_prep
 from leadfinder.config import SearchConfig, get_api_key
 from leadfinder.digital_presence import PresenceAnalyzer, analyze_leads
 from leadfinder.errors import (
+    AIAuthError,
+    AINetworkError,
+    AINotConfiguredError,
+    AIRateLimitError,
+    AIRequestError,
+    AIResponseValidationError,
+    AITimeoutError,
     ConfigError,
     LeadFinderError,
     MissingApiKeyError,
@@ -43,6 +53,20 @@ from leadfinder.workflow import (
 
 
 def friendly_error(error: Exception) -> str:
+    if isinstance(error, AINotConfiguredError):
+        return str(error)
+    if isinstance(error, AIAuthError):
+        return "AI API key invalid."
+    if isinstance(error, AIRateLimitError):
+        return "AI provider rate limit."
+    if isinstance(error, AITimeoutError):
+        return "AI provider timed out."
+    if isinstance(error, AIResponseValidationError):
+        return "AI returned an invalid structured response."
+    if isinstance(error, AINetworkError):
+        return "Could not reach AI provider."
+    if isinstance(error, AIRequestError):
+        return str(error)
     if isinstance(error, MissingApiKeyError):
         return (
             "No Places API key was found. Create a local .env file with "
@@ -185,8 +209,14 @@ def matches_filters(
 class LeadService:
     """GUI/CLI-facing facade over search, export, and local metadata."""
 
-    def __init__(self, store: LocalLeadStore | None = None) -> None:
+    def __init__(
+        self,
+        store: LocalLeadStore | None = None,
+        *,
+        ai_provider: AIProvider | None = None,
+    ) -> None:
         self.store = store or LocalLeadStore()
+        self.ai_provider = ai_provider
 
     def dry_run(self, config: SearchConfig) -> SearchPlan:
         return build_plan(config)
@@ -243,6 +273,32 @@ class LeadService:
         for item in items:
             score_lead(item.lead)
         return items
+
+    def prepare_sales(
+        self,
+        item: ManagedLead,
+        *,
+        language: str,
+        model: str = "",
+    ) -> SalesPrepResult:
+        return generate_sales_prep(
+            item,
+            language=language,
+            model=model,
+            provider=self.ai_provider,
+        )
+
+    def save_sales_prep(self, item: ManagedLead, result: SalesPrepResult) -> ManagedLead:
+        block = result.as_notes_block()
+        notes = item.notes.strip()
+        merged = f"{notes}\n\n{block}".strip() if notes else block
+        updated = self.set_notes(item, merged)
+        updated, _activity = self.add_activity(
+            updated,
+            "sales_prep_saved",
+            note="Saved AI sales prep to notes",
+        )
+        return updated
 
     def set_status(self, item: ManagedLead, status: str) -> ManagedLead:
         state = self.store.set_contact_status(item.lead.place_id, status)
