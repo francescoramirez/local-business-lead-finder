@@ -37,6 +37,19 @@ class Lead:
     region: str
     fetched_at: str
     data_source: str = "Google Maps"
+    presence_type: str = "unknown"
+    website_health: str = "unknown"
+    https: str = "unknown"
+    reachable: str = "unknown"
+    final_url: str = ""
+    presence_title: str = ""
+    presence_signals: str = ""
+    social_platform: str = ""
+    digital_opportunity_score: int = 0
+    opportunity_score: int = 0
+    opportunity_level: str = "low"
+    qualification_reason: str = ""
+    derived_tags: str = ""
 
     def to_row(self) -> dict[str, Any]:
         row = asdict(self)
@@ -45,7 +58,7 @@ class Lead:
         row["has_website"] = "yes" if self.has_website else "no"
         row["contactable"] = "yes" if self.contactable else "no"
         row["operational"] = "yes" if self.operational else "no"
-        return row
+        return {key: row[key] for key in EXPORT_COLUMNS}
 
 
 EXPORT_COLUMNS: tuple[str, ...] = (
@@ -75,6 +88,18 @@ EXPORT_COLUMNS: tuple[str, ...] = (
     "region",
     "fetched_at",
     "data_source",
+    "presence_type",
+    "website_health",
+    "https",
+    "reachable",
+    "final_url",
+    "presence_signals",
+    "social_platform",
+    "digital_opportunity_score",
+    "opportunity_score",
+    "opportunity_level",
+    "qualification_reason",
+    "derived_tags",
 )
 
 
@@ -112,3 +137,60 @@ class SearchReport:
     no_website: int
     contactable: int
     output_paths: list[str] = field(default_factory=list)
+    cancelled: bool = False
+
+
+@dataclass
+class SearchProgress:
+    message: str
+    location: str = ""
+    query: str = ""
+    api_requests: int = 0
+    places_found: int = 0
+    leads_count: int = 0
+    queries_executed: int = 0
+    analyzed: int = 0
+    analyze_total: int = 0
+
+
+CONTACT_STATUSES: tuple[str, ...] = (
+    "new",
+    "contacted",
+    "interested",
+    "follow_up",
+    "won",
+    "rejected",
+    "do_not_contact",
+)
+
+CONTACT_STATUS_LABELS: dict[str, str] = {
+    "new": "New",
+    "contacted": "Contacted",
+    "interested": "Interested",
+    "follow_up": "Follow-up",
+    "won": "Won",
+    "rejected": "Rejected",
+    "do_not_contact": "Do not contact",
+}
+
+
+@dataclass
+class LocalLeadState:
+    place_id: str
+    contact_status: str = "new"
+    notes: str = ""
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    last_contacted_at: str = ""
+    tags: str = ""
+
+
+@dataclass
+class ManagedLead:
+    lead: Lead
+    contact_status: str = "new"
+    notes: str = ""
+    first_seen_at: str = ""
+    last_seen_at: str = ""
+    last_contacted_at: str = ""
+    previously_seen: bool = False

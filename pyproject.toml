@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-business-lead-finder"
-version = "0.1.0"
-description = "Cost-aware Python CLI for discovering and prioritizing local business leads using Google Places API."
+version = "0.3.0"
+description = "Cost-aware Python CLI and desktop app for discovering and prioritizing local business leads using Google Places API."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ classifiers = [
     "Topic :: Utilities",
 ]
 dependencies = [
+    "platformdirs>=4.0.0",
     "python-dotenv>=1.0.0",
     "rich>=13.7.0",
     "typer>=0.12.0",
@@ -34,6 +35,9 @@ dev = [
     "mypy>=1.10.0",
     "pytest>=8.0.0",
     "ruff>=0.6.0",
+]
+gui = [
+    "PySide6-Essentials>=6.6.0",
 ]
 legacy = [
     "playwright>=1.44.0",
@@ -66,6 +70,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/leadfinder/cli.py" = ["B008"]
+"src/leadfinder/gui/*.py" = ["B008"]
 
 [tool.mypy]
 python_version = "3.10"

@@ -48,3 +48,27 @@ def test_scoring_is_deterministic() -> None:
     second = score_lead(_lead(website="", user_rating_count=3, rating=4.0))
     assert first.lead_score == second.lead_score
     assert first.lead_reason == second.lead_reason
+
+
+def test_opportunity_splits_digital_from_commercial() -> None:
+    none = score_lead(
+        _lead(website="", phone="+54 11 0000", status="OPERATIONAL", user_rating_count=20)
+    )
+    assert none.opportunity_score == 75
+    assert none.opportunity_level == "high"
+    assert none.digital_opportunity_score == 40
+    assert "High opportunity" in none.qualification_reason
+
+    social = _lead(
+        website="https://instagram.com/cafe",
+        phone="+54 11 0000",
+        status="OPERATIONAL",
+        user_rating_count=20,
+    )
+    social.website_status = "social_only"
+    social = score_lead(social)
+    assert social.lead_score == 55
+    assert social.digital_opportunity_score == 28
+    assert social.opportunity_score == 63
+    assert social.opportunity_level == "medium"
+

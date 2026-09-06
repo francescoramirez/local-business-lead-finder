@@ -75,3 +75,25 @@ def test_identical_in_run_query_is_a_permitted_cache_hit() -> None:
     assert report.api_requests == 1
     assert report.cache_hits == 1
     assert len(client.calls) == 1
+
+
+def test_website_analysis_runs_after_places_and_can_cancel() -> None:
+    client = FakeClient([[synthetic_place("ChIJ_SYNTHETIC_034", "Analyzed", website="https://x.test")]])
+    seen: list[str] = []
+
+    def analyze(lead):
+        seen.append(lead.place_id)
+        lead.website_status = "has_website"
+        return lead
+
+    config = SearchConfig(
+        business="cafe",
+        locations=["Example City"],
+        country="AR",
+        delay=0,
+        analyze_websites=True,
+    )
+    report = run_search(config, client, analyze=analyze, sleeper=lambda _: None)  # type: ignore[arg-type]
+    assert seen == ["ChIJ_SYNTHETIC_034"]
+    assert report.leads[0].website_status == "has_website"
+

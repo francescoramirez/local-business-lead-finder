@@ -15,6 +15,9 @@ class BusinessPreset:
     full_terms: tuple[str, ...]
     description: str
 
+    def display_label(self) -> str:
+        return self.name.replace("_", " ").title()
+
     def terms_for(self, coverage: str) -> list[str]:
         if coverage == "budget":
             return list(self.budget_terms)

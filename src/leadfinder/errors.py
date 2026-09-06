@@ -49,3 +49,7 @@ class PlacesClientError(LeadFinderError):
 
 class ExportError(LeadFinderError):
     pass
+
+
+class GuiDependencyError(LeadFinderError):
+    pass

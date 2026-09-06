@@ -39,6 +39,9 @@ def test_csv_and_json_use_stable_columns(tmp_path: Path) -> None:
     assert list(payload[0]) == list(EXPORT_COLUMNS)
     assert payload[0]["place_id"] == "ChIJ_SYNTHETIC_040"
     assert payload[0]["data_source"] == "Google Maps"
+    assert "opportunity_score" in header
+    assert "opportunity_level" in header
+    assert "qualification_reason" in header
 
 
 def test_export_refuses_silent_overwrite(tmp_path: Path) -> None:

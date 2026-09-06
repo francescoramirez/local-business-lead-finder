@@ -9,7 +9,8 @@ from rich.table import Table
 
 from leadfinder import __version__
 from leadfinder.config import SearchConfig, get_api_key, parse_locations
-from leadfinder.errors import LeadFinderError
+from leadfinder.digital_presence import PresenceAnalyzer, format_presence_report
+from leadfinder.errors import ConfigError, GuiDependencyError, LeadFinderError
 from leadfinder.models import SearchPlan, SearchReport, utc_now_iso
 from leadfinder.places_client import PlacesClient
 from leadfinder.presets import list_presets
@@ -198,6 +199,19 @@ def _print_summary(report: SearchReport) -> None:
     console.print("Place data is from Google Maps. See README compliance notes.")
 
 
+@app.command("analyze")
+def analyze_command(url: Annotated[str, typer.Argument(help="Website URL to classify.")]) -> None:
+    """Classify a single URL's digital presence. No crawling, no JavaScript."""
+    try:
+        if not url.strip():
+            raise ConfigError("Pass a website URL to analyze.")
+        result = PresenceAnalyzer().analyze(url)
+        console.print(format_presence_report(result))
+    except LeadFinderError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+
+
 @app.command("presets")
 def presets_command() -> None:
     """List built-in business presets."""
@@ -339,5 +353,20 @@ def search_command(
         export_report(report, config, utc_now_iso().replace(":", "").replace("-", "")[:15])
         _print_summary(report)
     except LeadFinderError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+
+
+@app.command("gui")
+def gui_command() -> None:
+    """Open the desktop application."""
+    try:
+        from leadfinder.gui.app import run_gui
+    except GuiDependencyError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+    try:
+        raise typer.Exit(run_gui())
+    except GuiDependencyError as error:
         err_console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1) from error
