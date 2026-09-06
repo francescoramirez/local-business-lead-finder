@@ -64,22 +64,10 @@ leadfinder presets
 
 ## Desktop GUI
 
-The same search engine is available as a small CRM-style desktop app: configure a search, dry-run the cost, review ranked leads, set contact status, add notes, and export.
+The same search engine is available as a small CRM-style desktop app: configure a search, qualify digital presence, track follow-ups, and export.
 
 ```text
-Search businesses
-      ↓
-Rank opportunities
-      ↓
-Review digital presence
-      ↓
-Review lead
-      ↓
-Set contact status
-      ↓
-Add notes
-      ↓
-Export / follow up
+Discover → Qualify → Contact → Follow-up → Won
 ```
 
 ```bash
@@ -89,13 +77,30 @@ leadfinder gui
 
 `pip install -e .` still installs the CLI only. If you run `leadfinder gui` without the extra, the app tells you how to install PySide6.
 
-Screenshot path (add a real capture when you have one; the table should show an **Opportunity** column):
+Screenshot paths (add real captures when you have them):
 
 ```text
 docs/images/leadfinder-gui.png
+docs/images/leadfinder-dashboard.png
+docs/images/leadfinder-pipeline.png
 ```
 
-Local contact status and notes are stored in a SQLite file under the OS application-data directory. Google Places payloads and HTML are not cached there.
+Local contact status, notes, tags, follow-ups, and activity history are stored in SQLite under the OS application-data directory. Google Places payloads, phone numbers, websites, and HTML are not cached there. A short local label (the displayed business name from a search you ran) is kept only so the Prospects list stays readable.
+
+## Prospect workflow
+
+Statuses: New → Contacted → Interested → Follow-up → Won, plus exits Rejected and Do not contact. Transitions are manual.
+
+Each prospect can have a next follow-up (UTC in storage, local time in the GUI). Overdue means the follow-up time has passed and the status is not Won / Rejected / Do not contact.
+
+Activity history is recorded locally when you change status, schedule a follow-up, or add a contact attempt. Nothing is sent automatically — no email, WhatsApp, or DMs.
+
+The GUI has Search, Pipeline, Prospects, and Dashboard tabs. Dashboard shows pipeline counts, a simple funnel, and recent search metadata (preset, location, lead counts) without storing Places results.
+
+```bash
+leadfinder stats
+leadfinder backup --output leadfinder-backup.db
+```
 
 ## Digital presence qualification
 
@@ -156,7 +161,8 @@ CSV / JSON
 - Deterministic lead scoring plus a separate digital-opportunity score
 - Superficial digital-presence checks (timeouts, size limits, no crawling)
 - Country / region / locality queries (Buenos Aires is an optional geo preset, not a global assumption)
-- No persistent cache of Places content or HTML; Place IDs and user notes/status may be stored locally
+- No persistent cache of Places content or HTML; Place IDs and user workflow metadata may be stored locally
+- Local prospect pipeline with SQLite migrations, follow-ups, and activity history
 - Desktop GUI on the same engine, with cooperative cancel and offscreen tests
 - HTTP-mocked pytest suite; Ruff and mypy in GitHub Actions without secrets
 
@@ -208,7 +214,7 @@ Permanently closed places are omitted by default. Exports go to `output/leads-<t
 
 ## Compliance
 
-This tool is independent software and is not a Google product. Place data comes from Google Maps / Places and is subject to [Google’s Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) and Maps Platform terms. Place IDs, contact status, and notes may be stored locally. Full Places records are not cached to skip billing. You are responsible for complying with applicable rules when contacting businesses.
+This tool is independent software and is not a Google product. Place data comes from Google Maps / Places and is subject to [Google’s Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) and Maps Platform terms. Place IDs, contact status, notes, tags, follow-ups, activity logs, and search-run metadata may be stored locally. Full Places records are not cached to skip billing. You are responsible for complying with applicable rules when contacting businesses.
 
 ## License
 

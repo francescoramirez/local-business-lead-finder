@@ -59,6 +59,12 @@ def test_filter_logic(tmp_path: Path) -> None:
     assert not matches_filters(item, opportunity_level="low")
     assert matches_filters(item, presence="no_website")
     assert not matches_filters(item, presence="social_only")
+    item.next_follow_up_at = "2020-01-01T00:00:00+00:00"
+    item.contact_status = "contacted"
+    assert matches_filters(item, follow_up_view="overdue")
+    item.tags = "priority, call"
+    assert matches_filters(item, tag="priority")
+    assert not matches_filters(item, tag="email-later")
 
 
 class _FakeClient:

@@ -15,6 +15,8 @@ def test_help_lists_main_commands() -> None:
     assert "presets" in result.stdout
     assert "gui" in result.stdout
     assert "analyze" in result.stdout
+    assert "stats" in result.stdout
+    assert "backup" in result.stdout
 
 
 def test_presets_lists_business_types() -> None:

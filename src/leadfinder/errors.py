@@ -51,5 +51,9 @@ class ExportError(LeadFinderError):
     pass
 
 
+class BackupError(LeadFinderError):
+    pass
+
+
 class GuiDependencyError(LeadFinderError):
     pass

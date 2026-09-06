@@ -357,6 +357,51 @@ def search_command(
         raise typer.Exit(code=1) from error
 
 
+@app.command("stats")
+def stats_command() -> None:
+    """Show local pipeline counts from the on-disk SQLite workspace."""
+    from leadfinder.application.service import LeadService
+
+    counts = LeadService().dashboard()
+    table = Table(title="Local pipeline", show_header=True, header_style="bold")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    for label, value in [
+        ("New", counts.new),
+        ("Contacted", counts.contacted),
+        ("Interested", counts.interested),
+        ("Follow-up", counts.follow_up),
+        ("Won", counts.won),
+        ("Rejected", counts.rejected),
+        ("Do not contact", counts.do_not_contact),
+        ("Overdue", counts.overdue),
+        ("Due today", counts.due_today),
+        ("Total", counts.total),
+    ]:
+        table.add_row(label, str(value))
+    console.print(table)
+
+
+@app.command("backup")
+def backup_command(
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Destination .db file."),
+    ] = None,
+) -> None:
+    """Copy the local SQLite workspace with the SQLite backup API."""
+    from leadfinder.application.service import LeadService
+    from leadfinder.paths import data_dir
+
+    try:
+        destination = output or data_dir() / f"leadfinder-backup-{utc_now_iso()[:10]}.db"
+        written = LeadService().backup(destination)
+        console.print(f"Backup saved to {written}")
+    except LeadFinderError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+
+
 @app.command("gui")
 def gui_command() -> None:
     """Open the desktop application."""

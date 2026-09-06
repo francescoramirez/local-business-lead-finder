@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStatusBar,
     QTableView,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -32,12 +34,17 @@ from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
 from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError
 from leadfinder.fields import FIELD_PROFILES
+from leadfinder.gui.dashboard_page import DashboardPage
+from leadfinder.gui.dialogs import ActivityDialog, FollowUpDialog
+from leadfinder.gui.formatters import format_when
 from leadfinder.gui.lead_model import (
     OPPORTUNITY_LABELS,
     WEBSITE_LABELS,
     LeadFilterProxy,
     LeadTableModel,
 )
+from leadfinder.gui.pipeline_page import PipelinePage
+from leadfinder.gui.prospects_page import ProspectsPage
 from leadfinder.gui.workers import AnalyzeWorker, SearchWorker
 from leadfinder.models import (
     CONTACT_STATUS_LABELS,
@@ -48,6 +55,7 @@ from leadfinder.models import (
     SearchReport,
 )
 from leadfinder.presets import list_presets
+from leadfinder.workflow import ACTIVITY_TYPE_LABELS, ContactStatus
 
 
 class MainWindow(QMainWindow):
@@ -68,13 +76,14 @@ class MainWindow(QMainWindow):
         self.model = LeadTableModel()
         self.proxy = LeadFilterProxy()
         self.proxy.setSourceModel(self.model)
-        self.proxy.setSortRole(Qt.ItemDataRole.DisplayRole)
+        self.proxy.setSortRole(Qt.ItemDataRole.UserRole + 1)
 
         self._build_ui()
         self._connect()
         self._restore_settings()
         self._apply_filters()
         self._update_empty_state()
+        self._refresh_secondary()
 
     def _build_ui(self) -> None:
         header = QLabel("LeadFinder")
@@ -114,6 +123,7 @@ class MainWindow(QMainWindow):
         self.export_visible = QCheckBox("Export visible rows only")
         self.export_visible.setChecked(True)
         self.analyze_now_btn = QPushButton("Analyze websites")
+        self.export_pipeline_btn = QPushButton("Export pipeline")
 
         form = QFormLayout()
         form.addRow("Business", self.preset)
@@ -133,7 +143,8 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.export_csv_btn, 1, 1)
         buttons.addWidget(self.export_json_btn, 2, 0)
         buttons.addWidget(self.analyze_now_btn, 2, 1)
-        buttons.addWidget(self.export_visible, 3, 0, 1, 2)
+        buttons.addWidget(self.export_visible, 3, 0)
+        buttons.addWidget(self.export_pipeline_btn, 3, 1)
         search_box = QGroupBox("Search")
         search_layout = QVBoxLayout(search_box)
         search_layout.addLayout(form)
@@ -188,6 +199,16 @@ class MainWindow(QMainWindow):
         self.filter_presence.addItem("Link aggregator", "link_aggregator")
         self.filter_presence.addItem("Website", "website")
         self.filter_presence.addItem("Unreachable", "unreachable")
+        self.filter_follow = QComboBox()
+        self.filter_follow.addItem("Any follow-up", "")
+        self.filter_follow.addItem("Needs follow-up", "needs")
+        self.filter_follow.addItem("Due today", "due_today")
+        self.filter_follow.addItem("Overdue", "overdue")
+        self.filter_follow.addItem("Upcoming", "upcoming")
+        self.filter_follow.addItem("No follow-up", "none")
+        self.filter_tag = QLineEdit()
+        self.filter_tag.setPlaceholderText("Tag")
+        self.filter_tag.setMaximumWidth(120)
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Find"))
         filters.addWidget(self.filter_text, 1)
@@ -195,6 +216,8 @@ class MainWindow(QMainWindow):
         filters.addWidget(self.min_score)
         filters.addWidget(self.filter_opportunity)
         filters.addWidget(self.filter_presence)
+        filters.addWidget(self.filter_follow)
+        filters.addWidget(self.filter_tag)
         filters.addWidget(self.filter_no_website)
         filters.addWidget(self.filter_phone)
         filters.addWidget(self.filter_operational)
@@ -236,25 +259,53 @@ class MainWindow(QMainWindow):
         self.detail_seen = QLabel("")
         self.open_maps = QPushButton("Open in Google Maps")
         self.open_maps.setEnabled(False)
+        self.open_website = QPushButton("Open website")
+        self.open_website.setEnabled(False)
+        self.mark_contacted_btn = QPushButton("Mark contacted")
+        self.mark_interested_btn = QPushButton("Mark interested")
+        self.schedule_btn = QPushButton("Schedule follow-up")
+        self.activity_btn = QPushButton("Add activity")
         self.contact_status = QComboBox()
         for status in CONTACT_STATUSES:
             self.contact_status.addItem(CONTACT_STATUS_LABELS[status], status)
         self.notes = QTextEdit()
         self.notes.setPlaceholderText("Notes are saved automatically.")
+        self.tags_edit = QLineEdit()
+        self.tags_edit.setPlaceholderText("tags, comma-separated")
+        self.follow_label = QLabel("No follow-up scheduled")
+        self.detail_activity = QPlainTextEdit()
+        self.detail_activity.setReadOnly(True)
+        self.detail_activity.setMaximumHeight(140)
         details = QGroupBox("Lead details")
         details_layout = QVBoxLayout(details)
+        details_layout.addWidget(QLabel("Overview"))
         details_layout.addWidget(self.detail_name)
         details_layout.addWidget(self.detail_score)
         details_layout.addWidget(self.detail_reason)
-        details_layout.addWidget(self.detail_presence)
         details_layout.addWidget(self.detail_meta)
         details_layout.addWidget(self.detail_seen)
-        details_layout.addWidget(self.open_maps)
+        details_layout.addWidget(QLabel("Digital presence"))
+        details_layout.addWidget(self.detail_presence)
+        actions = QHBoxLayout()
+        actions.addWidget(self.mark_contacted_btn)
+        actions.addWidget(self.mark_interested_btn)
+        actions.addWidget(self.schedule_btn)
+        actions.addWidget(self.activity_btn)
+        details_layout.addLayout(actions)
+        links = QHBoxLayout()
+        links.addWidget(self.open_maps)
+        links.addWidget(self.open_website)
+        details_layout.addLayout(links)
+        details_layout.addWidget(QLabel("Workflow"))
         details_form = QFormLayout()
         details_form.addRow("Contact status", self.contact_status)
+        details_form.addRow("Next follow-up", self.follow_label)
+        details_form.addRow("Tags", self.tags_edit)
         details_layout.addLayout(details_form)
         details_layout.addWidget(QLabel("Notes"))
         details_layout.addWidget(self.notes)
+        details_layout.addWidget(QLabel("Activity"))
+        details_layout.addWidget(self.detail_activity)
 
         right_split = QSplitter(Qt.Orientation.Vertical)
         right_split.addWidget(table_wrap)
@@ -269,11 +320,20 @@ class MainWindow(QMainWindow):
         split.setStretchFactor(1, 1)
         split.setSizes([340, 940])
 
+        self.pipeline_page = PipelinePage()
+        self.prospects_page = ProspectsPage()
+        self.dashboard_page = DashboardPage()
+        self.tabs = QTabWidget()
+        self.tabs.addTab(split, "Search")
+        self.tabs.addTab(self.pipeline_page, "Pipeline")
+        self.tabs.addTab(self.prospects_page, "Prospects")
+        self.tabs.addTab(self.dashboard_page, "Dashboard")
+
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.addWidget(header)
         layout.addWidget(subtitle)
-        layout.addWidget(split, 1)
+        layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready")
@@ -290,6 +350,13 @@ class MainWindow(QMainWindow):
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(lambda: self.export_leads("csv"))
         self.addAction(export_action)
+        backup_action = QAction("Backup local data", self)
+        backup_action.triggered.connect(self.backup_db)
+        self.addAction(backup_action)
+        file_menu = self.menuBar().addMenu("File")
+        file_menu.addAction(export_action)
+        file_menu.addAction(backup_action)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _connect(self) -> None:
         self.dry_run_btn.clicked.connect(self.run_dry_run)
@@ -298,6 +365,7 @@ class MainWindow(QMainWindow):
         self.analyze_now_btn.clicked.connect(self.start_analyze)
         self.export_csv_btn.clicked.connect(lambda: self.export_leads("csv"))
         self.export_json_btn.clicked.connect(lambda: self.export_leads("json"))
+        self.export_pipeline_btn.clicked.connect(self.export_pipeline)
         self.filter_text.textChanged.connect(self._apply_filters)
         self.min_score.valueChanged.connect(self._apply_filters)
         self.filter_no_website.toggled.connect(self._apply_filters)
@@ -306,10 +374,27 @@ class MainWindow(QMainWindow):
         self.filter_status.currentIndexChanged.connect(self._apply_filters)
         self.filter_opportunity.currentIndexChanged.connect(self._apply_filters)
         self.filter_presence.currentIndexChanged.connect(self._apply_filters)
+        self.filter_follow.currentIndexChanged.connect(self._apply_filters)
+        self.filter_tag.textChanged.connect(self._apply_filters)
         self.table.selectionModel().selectionChanged.connect(self._on_selection)
+        self.table.customContextMenuRequested.connect(self._table_menu)
         self.contact_status.currentIndexChanged.connect(self._on_status_changed)
         self.notes.textChanged.connect(self._schedule_notes_save)
+        self.tags_edit.editingFinished.connect(self._save_tags)
         self.open_maps.clicked.connect(self._open_maps)
+        self.open_website.clicked.connect(self._open_website)
+        self.mark_contacted_btn.clicked.connect(
+            lambda: self._quick_status(ContactStatus.CONTACTED.value)
+        )
+        self.mark_interested_btn.clicked.connect(
+            lambda: self._quick_status(ContactStatus.INTERESTED.value)
+        )
+        self.schedule_btn.clicked.connect(self.schedule_follow_up)
+        self.activity_btn.clicked.connect(self.add_activity)
+        self.tabs.currentChanged.connect(self._refresh_secondary)
+        self.pipeline_page.status_dropped.connect(self._on_pipeline_drop)
+        self.pipeline_page.card_selected.connect(self._select_place)
+        self.prospects_page.selected.connect(self._select_place)
 
     def current_config(self) -> SearchConfig:
         location = self.location.text().strip()
@@ -455,6 +540,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Loaded {len(managed)} leads{cancelled}.")
         if managed:
             self.table.selectRow(0)
+        self._refresh_secondary()
 
     def _on_search_failed(self, message: str) -> None:
         self.progress.setRange(0, 1)
@@ -480,6 +566,8 @@ class MainWindow(QMainWindow):
             contact_status=str(self.filter_status.currentData() or ""),
             opportunity_level=str(self.filter_opportunity.currentData() or ""),
             presence=str(self.filter_presence.currentData() or ""),
+            follow_up_view=str(self.filter_follow.currentData() or ""),
+            tag=self.filter_tag.text(),
         )
         self._update_empty_state()
 
@@ -545,10 +633,14 @@ class MainWindow(QMainWindow):
         if item.contact_status != "new":
             seen += f"  ·  {CONTACT_STATUS_LABELS.get(item.contact_status, item.contact_status)}"
         self.detail_seen.setText(seen)
+        self.follow_label.setText(format_when(item.next_follow_up_at))
+        self.tags_edit.setText(item.tags)
         self.open_maps.setEnabled(bool(lead.google_maps_url))
+        self.open_website.setEnabled(bool(lead.website))
         index = self.contact_status.findData(item.contact_status)
         self.contact_status.setCurrentIndex(max(index, 0))
         self.notes.setPlainText(item.notes)
+        self._render_activity(item.lead.place_id)
         self._updating_details = False
 
     def _on_status_changed(self) -> None:
@@ -559,6 +651,7 @@ class MainWindow(QMainWindow):
         self._selected = updated
         self.model.update_row(updated)
         self._show_lead(updated)
+        self._refresh_secondary()
 
     def _schedule_notes_save(self) -> None:
         if self._updating_details:
@@ -572,9 +665,135 @@ class MainWindow(QMainWindow):
         self._selected = updated
         self.model.update_row(updated)
 
+    def _save_tags(self) -> None:
+        if self._updating_details or self._selected is None:
+            return
+        updated = self.service.set_tags(self._selected, self.tags_edit.text())
+        self._selected = updated
+        self.model.update_row(updated)
+        self._refresh_secondary()
+
+    def _render_activity(self, place_id: str) -> None:
+        lines = []
+        for activity in self.service.activities(place_id):
+            label = ACTIVITY_TYPE_LABELS.get(activity.activity_type, activity.activity_type)
+            extra = f" · {activity.note}" if activity.note else ""
+            lines.append(f"{format_when(activity.created_at)}\n{label}{extra}")
+        self.detail_activity.setPlainText("\n\n".join(lines) if lines else "No activity yet.")
+
+    def _quick_status(self, status: str) -> None:
+        if self._selected is None:
+            return
+        self.contact_status.setCurrentIndex(max(self.contact_status.findData(status), 0))
+        self._on_status_changed()
+
+    def schedule_follow_up(self) -> None:
+        if self._selected is None:
+            return
+        dialog = FollowUpDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        updated = self.service.set_follow_up(self._selected, dialog.iso_value())
+        self._selected = updated
+        self.model.update_row(updated)
+        self._show_lead(updated)
+        self._refresh_secondary()
+
+    def add_activity(self) -> None:
+        if self._selected is None:
+            return
+        dialog = ActivityDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        updated, _activity = self.service.add_activity(
+            self._selected,
+            str(dialog.activity_type.currentData()),
+            note=dialog.note.toPlainText(),
+            contact_method=str(dialog.method.currentData() or ""),
+            outcome=str(dialog.outcome.currentData() or ""),
+        )
+        self._selected = updated
+        self.model.update_row(updated)
+        self._show_lead(updated)
+        self._refresh_secondary()
+
+    def _open_website(self) -> None:
+        if self._selected and self._selected.lead.website:
+            QDesktopServices.openUrl(QUrl(self._selected.lead.website))
+
     def _open_maps(self) -> None:
         if self._selected and self._selected.lead.google_maps_url:
             QDesktopServices.openUrl(QUrl(self._selected.lead.google_maps_url))
+
+    def _refresh_secondary(self) -> None:
+        self.pipeline_page.set_leads(self.model.leads())
+        self.prospects_page.set_states(self.service.prospects())
+        self.dashboard_page.refresh(
+            self.service.dashboard(),
+            self.service.conversion_summary(),
+            self.service.search_history(),
+        )
+
+    def _select_place(self, place_id: str) -> None:
+        for item in self.model.leads():
+            if item.lead.place_id == place_id:
+                self._show_lead(item)
+                self.tabs.setCurrentIndex(0)
+                return
+
+    def _on_pipeline_drop(self, place_id: str, status: str) -> None:
+        item = next((row for row in self.model.leads() if row.lead.place_id == place_id), None)
+        if item is None:
+            return
+        updated = self.service.set_status(item, status)
+        self.model.update_row(updated)
+        if self._selected and self._selected.lead.place_id == place_id:
+            self._show_lead(updated)
+        self._refresh_secondary()
+
+    def _table_menu(self, pos) -> None:
+        if self._selected is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("Mark contacted", lambda: self._quick_status(ContactStatus.CONTACTED.value))
+        menu.addAction(
+            "Mark interested",
+            lambda: self._quick_status(ContactStatus.INTERESTED.value),
+        )
+        menu.addAction("Schedule follow-up", self.schedule_follow_up)
+        menu.addAction("Add activity", self.add_activity)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def export_pipeline(self) -> None:
+        items = self.model.leads()
+        if not items:
+            QMessageBox.information(self, "Export", "There are no leads to export.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export pipeline", str(Path.home() / "pipeline.csv"), "*.csv"
+        )
+        if not path:
+            return
+        written = self.service.export_pipeline(items, Path(path))
+        activities = self.service.export_activities(
+            [item.lead.place_id for item in items],
+            Path(path).with_suffix(".activities.json"),
+        )
+        QMessageBox.information(
+            self, "Export", f"Saved pipeline to:\n{written}\n\nActivities:\n{activities}"
+        )
+
+    def backup_db(self) -> None:
+        suggested = str(Path.home() / "leadfinder-backup.db")
+        path, _ = QFileDialog.getSaveFileName(self, "Backup local data", suggested, "*.db")
+        if not path:
+            return
+        try:
+            written = self.service.backup(Path(path))
+        except LeadFinderError as error:
+            QMessageBox.warning(self, "Backup", friendly_error(error))
+            return
+        QMessageBox.information(self, "Backup", f"Saved local database to:\n{written}")
 
     def export_leads(self, fmt: str) -> None:
         if self.export_visible.isChecked():

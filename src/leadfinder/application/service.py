@@ -17,17 +17,29 @@ from leadfinder.errors import (
 )
 from leadfinder.exporters import export_leads
 from leadfinder.models import (
+    Activity,
     Lead,
+    LocalLeadState,
     ManagedLead,
     SearchPlan,
     SearchProgress,
     SearchReport,
+    SearchRun,
     utc_now_iso,
 )
 from leadfinder.places_client import PlacesClient
 from leadfinder.scoring import score_lead
 from leadfinder.search import build_plan, run_search
 from leadfinder.storage.local_leads import LocalLeadStore
+from leadfinder.workflow import (
+    PipelineCounts,
+    contacted_to_interested_rate,
+    interested_to_won_rate,
+    matches_follow_up_view,
+    parse_tags,
+    pipeline_counts,
+    shift_iso,
+)
 
 
 def friendly_error(error: Exception) -> str:
@@ -59,24 +71,45 @@ def friendly_error(error: Exception) -> str:
     return "Something went wrong while running the search."
 
 
+def apply_state(item: ManagedLead, state: LocalLeadState) -> ManagedLead:
+    item.contact_status = state.contact_status
+    item.notes = state.notes
+    item.first_seen_at = state.first_seen_at
+    item.last_seen_at = state.last_seen_at
+    item.last_contacted_at = state.last_contacted_at
+    item.next_follow_up_at = state.next_follow_up_at
+    item.last_activity_at = state.last_activity_at
+    item.tags = state.tags
+    item.label = state.label
+    item.previously_seen = True
+    return item
+
+
 def merge_local_state(leads: list[Lead], store: LocalLeadStore) -> list[ManagedLead]:
     known = store.get_many([lead.place_id for lead in leads if lead.place_id])
     merged: list[ManagedLead] = []
     for lead in leads:
         existing = known.get(lead.place_id)
         previously_seen = existing is not None
-        state = store.mark_seen(lead.place_id) if lead.place_id else None
-        merged.append(
-            ManagedLead(
-                lead=lead,
-                contact_status=state.contact_status if state else "new",
-                notes=state.notes if state else "",
-                first_seen_at=state.first_seen_at if state else "",
-                last_seen_at=state.last_seen_at if state else "",
-                last_contacted_at=state.last_contacted_at if state else "",
-                previously_seen=previously_seen,
+        state = (
+            store.mark_seen(
+                lead.place_id,
+                label=lead.name,
+                opportunity_level=lead.opportunity_level,
+                opportunity_score=lead.opportunity_score,
+                has_phone=lead.contactable,
             )
+            if lead.place_id
+            else None
         )
+        item = ManagedLead(
+            lead=lead,
+            previously_seen=previously_seen,
+        )
+        if state:
+            apply_state(item, state)
+            item.previously_seen = previously_seen
+        merged.append(item)
     return merged
 
 
@@ -100,6 +133,8 @@ def matches_filters(
     contact_status: str = "",
     opportunity_level: str = "",
     presence: str = "",
+    follow_up_view: str = "",
+    tag: str = "",
 ) -> bool:
     lead = item.lead
     needle = text.strip().lower()
@@ -115,6 +150,8 @@ def matches_filters(
                 lead.opportunity_level,
                 item.notes,
                 item.contact_status,
+                item.tags,
+                item.label,
             ]
         ).lower()
         if needle not in blob:
@@ -135,6 +172,13 @@ def matches_filters(
         allowed = PRESENCE_FILTERS.get(presence)
         if allowed is not None and lead.website_status not in allowed:
             return False
+    if tag:
+        if tag.strip().lower() not in parse_tags(item.tags):
+            return False
+    if follow_up_view and not matches_follow_up_view(
+        item.contact_status, item.next_follow_up_at, follow_up_view
+    ):
+        return False
     return True
 
 
@@ -168,6 +212,17 @@ class LeadService:
             sleeper=sleeper,
         )
         managed = merge_local_state(report.leads, self.store)
+        location = config.locations[0] if config.locations else ""
+        self.store.record_search(
+            business_preset=config.business,
+            location=location,
+            region=config.region,
+            country=config.country,
+            lead_count=len(managed),
+            high_opportunity_count=sum(
+                1 for item in managed if item.lead.opportunity_level == "high"
+            ),
+        )
         return report, managed
 
     def analyze_managed(
@@ -191,16 +246,89 @@ class LeadService:
 
     def set_status(self, item: ManagedLead, status: str) -> ManagedLead:
         state = self.store.set_contact_status(item.lead.place_id, status)
-        item.contact_status = state.contact_status
-        item.last_contacted_at = state.last_contacted_at
-        item.previously_seen = True
-        return item
+        return apply_state(item, state)
 
     def set_notes(self, item: ManagedLead, notes: str) -> ManagedLead:
         state = self.store.set_notes(item.lead.place_id, notes)
-        item.notes = state.notes
-        item.previously_seen = True
-        return item
+        return apply_state(item, state)
+
+    def set_tags(self, item: ManagedLead, tags: str) -> ManagedLead:
+        state = self.store.set_tags(item.lead.place_id, tags)
+        return apply_state(item, state)
+
+    def set_follow_up(self, item: ManagedLead, when: str) -> ManagedLead:
+        state = self.store.set_follow_up(item.lead.place_id, when)
+        return apply_state(item, state)
+
+    def schedule_in_days(self, item: ManagedLead, days: int) -> ManagedLead:
+        return self.set_follow_up(item, shift_iso(days))
+
+    def add_activity(
+        self,
+        item: ManagedLead,
+        activity_type: str,
+        *,
+        note: str = "",
+        contact_method: str = "",
+        outcome: str = "",
+    ) -> tuple[ManagedLead, Activity]:
+        activity = self.store.add_activity(
+            item.lead.place_id,
+            activity_type,
+            note=note,
+            contact_method=contact_method,
+            outcome=outcome,
+        )
+        state = self.store.get(item.lead.place_id)
+        if state:
+            apply_state(item, state)
+        return item, activity
+
+    def activities(self, place_id: str) -> list[Activity]:
+        return self.store.list_activities(place_id)
+
+    def prospects(self) -> list[LocalLeadState]:
+        return self.store.list_all()
+
+    def search_history(self) -> list[SearchRun]:
+        return self.store.list_searches()
+
+    def dashboard(self) -> PipelineCounts:
+        return pipeline_counts(self.store.pipeline_rows())
+
+    def conversion_summary(self) -> dict[str, float | None]:
+        counts = self.dashboard()
+        return {
+            "contacted_to_interested": contacted_to_interested_rate(counts),
+            "interested_to_won": interested_to_won_rate(counts),
+        }
+
+    def backup(self, destination: Path) -> Path:
+        return self.store.backup(destination)
+
+    def export_pipeline(self, items: list[ManagedLead], output: Path) -> Path:
+        from leadfinder.exporters import write_pipeline_csv
+
+        return write_pipeline_csv(items, output, force=True)
+
+    def export_activities(self, place_ids: list[str], output: Path) -> Path:
+        from leadfinder.exporters import write_activities_json
+
+        payload = []
+        for place_id in place_ids:
+            for activity in self.store.list_activities(place_id):
+                payload.append(
+                    {
+                        "id": activity.id,
+                        "place_id": activity.place_id,
+                        "activity_type": activity.activity_type,
+                        "created_at": activity.created_at,
+                        "note": activity.note,
+                        "contact_method": activity.contact_method,
+                        "outcome": activity.outcome,
+                    }
+                )
+        return write_activities_json(payload, output, force=True)
 
     def export(self, leads: list[Lead], *, fmt: str, output: Path | None = None) -> Path:
         stamp = utc_now_iso().replace(":", "").replace("-", "")[:15]

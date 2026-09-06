@@ -130,3 +130,36 @@ def test_opportunity_filter_and_presence_details(qapp, tmp_path: Path) -> None:
     restored = LocalLeadStore(tmp_path / "leads.db").get("ChIJ_SYNTHETIC_303")
     assert restored is not None
     assert restored.notes == "Call Tuesday"
+
+
+def test_pipeline_dashboard_and_follow_up_flow(qapp, tmp_path: Path) -> None:
+    store = LocalLeadStore(tmp_path / "leads.db")
+    service = LeadService(store)
+    window = MainWindow(service)
+    assert window.tabs.count() == 4
+    item = _managed(store, "ChIJ_SYNTHETIC_305", "Pipeline Cafe")
+    window.model.set_leads([item])
+    updated = window.service.set_status(item, "contacted")
+    window.model.update_row(updated)
+    window._show_lead(updated)
+    assert "Status changed" in window.detail_activity.toPlainText()
+    updated = window.service.set_follow_up(updated, "2020-01-01T00:00:00+00:00")
+    window.model.set_leads([updated])
+    window.filter_follow.setCurrentIndex(window.filter_follow.findData("overdue"))
+    window._apply_filters()
+    assert window.proxy.rowCount() == 1
+    window.service.set_tags(updated, "priority")
+    window._refresh_secondary()
+    assert window.pipeline_page.columns["contacted"].count() == 1
+    assert "overdue" in window.dashboard_page.overdue_banner.text().lower()
+    path = window.service.export_pipeline([updated], tmp_path / "pipeline.csv")
+    text = path.read_text(encoding="utf-8")
+    assert "contact_status" in text
+    assert "next_follow_up_at" in text
+    window.close()
+    restored = LocalLeadStore(tmp_path / "leads.db")
+    state = restored.get("ChIJ_SYNTHETIC_305")
+    assert state is not None
+    assert state.contact_status == "contacted"
+    assert state.tags == "priority"
+    restored.close()

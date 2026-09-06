@@ -4,6 +4,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from leadfinder.workflow import CONTACT_STATUS_LABELS as CONTACT_STATUS_LABELS
+from leadfinder.workflow import CONTACT_STATUSES as CONTACT_STATUSES
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -153,27 +156,6 @@ class SearchProgress:
     analyze_total: int = 0
 
 
-CONTACT_STATUSES: tuple[str, ...] = (
-    "new",
-    "contacted",
-    "interested",
-    "follow_up",
-    "won",
-    "rejected",
-    "do_not_contact",
-)
-
-CONTACT_STATUS_LABELS: dict[str, str] = {
-    "new": "New",
-    "contacted": "Contacted",
-    "interested": "Interested",
-    "follow_up": "Follow-up",
-    "won": "Won",
-    "rejected": "Rejected",
-    "do_not_contact": "Do not contact",
-}
-
-
 @dataclass
 class LocalLeadState:
     place_id: str
@@ -183,6 +165,35 @@ class LocalLeadState:
     last_seen_at: str = ""
     last_contacted_at: str = ""
     tags: str = ""
+    next_follow_up_at: str = ""
+    last_activity_at: str = ""
+    label: str = ""
+    opportunity_level: str = ""
+    opportunity_score: int = 0
+    has_phone: bool = False
+
+
+@dataclass
+class Activity:
+    id: int
+    place_id: str
+    activity_type: str
+    created_at: str
+    note: str = ""
+    contact_method: str = ""
+    outcome: str = ""
+
+
+@dataclass
+class SearchRun:
+    id: int
+    created_at: str
+    business_preset: str
+    location: str
+    region: str
+    country: str
+    lead_count: int
+    high_opportunity_count: int
 
 
 @dataclass
@@ -194,3 +205,7 @@ class ManagedLead:
     last_seen_at: str = ""
     last_contacted_at: str = ""
     previously_seen: bool = False
+    next_follow_up_at: str = ""
+    last_activity_at: str = ""
+    tags: str = ""
+    label: str = ""
