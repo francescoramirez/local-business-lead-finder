@@ -1,15 +1,52 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Python
 __pycache__/
-*.pyc
-negocios_sin_web.csv
-negocios_sin_web_api.csv
-negocios_revisados_api.csv
-negocios_sin_web_api.txt
-hoteles_sin_web.csv
-hoteles_revisados.csv
-hoteles_sin_web.txt
-hoteles_sin_web_api.csv
-hoteles_revisados_api.csv
-hoteles_sin_web_api.txt
-places_cache.json
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Test / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Tool runtime output (may contain Google Maps content)
+output/
 cache/
+data/
+places_cache.json
+places_cache*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Agent / local research
+.firecrawl/
+
+# Legacy scraper outputs
+hoteles_*.csv
+hoteles_*.txt
+negocios_*.csv
+negocios_*.txt

@@ -1,230 +1,153 @@
-# Scraper de negocios sin sitio web
+# Local Business Lead Finder
 
-Busca negocios en Google Places y guarda los que no tienen sitio web cargado.
+Cost-aware Python CLI for discovering and prioritizing local business leads using Google Places API.
 
-El script recomendado es:
+[![CI](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml)
+
+Turn a business type and a location into a ranked outreach list: Google Places API (New) → normalize → filter → score → CSV/JSON. Built for web agencies looking for local businesses with weak or missing websites.
+
+Independent project. **Not affiliated with Google.**
+
+**Stack:** Python 3.10+ · Google Places API (New) · Typer · Rich · pytest · Ruff · mypy · GitHub Actions
+
+## Quick start
+
+```bash
+python -m pip install -e .
+leadfinder --help
+```
+
+Plan a search without spending API credits (no key, no network):
+
+```bash
+leadfinder dry-run \
+  --business cafe \
+  --location "Mar del Plata" \
+  --region "Buenos Aires" \
+  --country AR
+```
+
+Example / synthetic dry-run output:
 
 ```text
-scraper_hoteles_places_api.py
+Dry run
+  Business preset     cafe
+  Search terms        cafe
+  Locations           1
+  Country             AR
+  Region              Buenos Aires
+  Max queries         1
+  Max API requests    1
+  Page size           20
+  Pages               1
+  Field profile       enterprise
+  Billing tier        Text Search Enterprise
+  Locations:
+    - Mar del Plata
+
+No API requests were made.
 ```
 
-Aunque el nombre diga `hoteles`, ahora sirve para hoteles, cafes, restaurantes y otros rubros.
+Then run a real search (requires `GOOGLE_MAPS_API_KEY`):
 
-## 1. Configurar la API key
-
-En PowerShell, para la sesion actual:
-
-```powershell
-$env:GOOGLE_MAPS_API_KEY="TU_API_KEY"
+```bash
+leadfinder search \
+  --business cafe \
+  --location "Mar del Plata" \
+  --region "Buenos Aires" \
+  --country AR
 ```
 
-Para dejarla fija en Windows:
-
-```powershell
-setx GOOGLE_MAPS_API_KEY "TU_API_KEY"
+```bash
+leadfinder presets
 ```
 
-Despues de `setx`, cerra y abri PowerShell.
-
-No pegues la API key dentro del codigo ni la subas a GitHub.
-
-## 2. Presets disponibles
-
-Usa `--business-preset` para elegir rubro:
-
-- `hotel`
-- `cafe`
-- `restaurant`
-- `bar`
-- `gym`
-- `beauty_salon`
-- `dentist`
-- `real_estate_agency`
-- `car_repair`
-- `technical_service`
-- `electrician`
-- `plumber`
-- `locksmith`
-- `painter`
-- `roofing_contractor`
-- `laundry`
-- `moving_company`
-- `hardware_store`
-
-Cada preset define automaticamente:
-
-- `place_type` de Google Places.
-- Keywords baratas para `budget`.
-- Keywords extra para `balanced` y `full`.
-
-## 3. Prueba barata
-
-Hoteles en Mar del Plata:
-
-```powershell
-python scraper_hoteles_places_api.py --test --business-preset hotel
-```
-
-Cafes en Mar del Plata:
-
-```powershell
-python scraper_hoteles_places_api.py --test --business-preset cafe
-```
-
-Restaurantes en Mar del Plata:
-
-```powershell
-python scraper_hoteles_places_api.py --test --business-preset restaurant
-```
-
-Electricistas en Mar del Plata:
-
-```powershell
-python scraper_hoteles_places_api.py --test --business-preset electrician
-```
-
-## 4. Ver ciudades sin gastar creditos
-
-Antes de ejecutar la busqueda completa, podes ver que ubicaciones va a recorrer:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset cafe --coverage budget --print-locations
-```
-
-El modo `budget` incluye CABA, barrios comerciales principales, AMBA/GBA, costa atlantica, destinos turisticos y ciudades grandes/cabeceras comerciales de provincia de Buenos Aires. Evita pueblos y ciudades chicas.
-
-## 5. Ejecutar busqueda recomendada
-
-Cafes:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset cafe --coverage budget --max-api-requests 100
-```
-
-Hoteles:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset hotel --coverage budget --max-api-requests 100
-```
-
-Restaurantes:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset restaurant --coverage budget --max-api-requests 100
-```
-
-Servicios tecnicos:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset technical_service --coverage balanced --max-api-requests 180
-```
-
-Electricistas:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset electrician --coverage budget --max-api-requests 100
-```
-
-Gasistas y plomeros:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset plumber --search-terms "gasista,gasista matriculado,plomero" --coverage balanced --max-api-requests 180
-```
-
-Cerrajeros:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset locksmith --coverage budget --max-api-requests 100
-```
-
-Pintores:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset painter --coverage budget --max-api-requests 100
-```
-
-Techistas:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset roofing_contractor --coverage budget --max-api-requests 100
-```
-
-Este modo usa:
-
-- 1 keyword principal segun el preset.
-- 1 pagina por ubicacion.
-- Hasta 20 resultados por pagina.
-- Cache en `cache/places_cache.json`.
-- Maximo de 100 requests nuevas no cacheadas.
-
-Si queres gastar menos y no necesitas telefonos:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset cafe --coverage budget --max-api-requests 100 --no-include-lead-fields
-```
-
-## 6. Modos de cobertura
-
-- `--coverage budget`: recomendado. CABA + ciudades importantes, evitando pueblos.
-- `--coverage balanced`: suma mas ciudades medianas y mas keywords del rubro.
-- `--coverage full`: recorre casi todos los partidos y varias keywords. Es el mas caro.
-
-Ejemplo mas amplio:
-
-```powershell
-python scraper_hoteles_places_api.py --business-preset cafe --coverage balanced --max-api-requests 180
-```
-
-## 7. Busquedas personalizadas
-
-No estas limitado a los presets. Podes pasar keywords y un tipo de Google Places:
-
-```powershell
-python scraper_hoteles_places_api.py --place-type cafe --search-terms "cafe,cafeteria" --locations "Ciudad Autonoma de Buenos Aires,Mar del Plata,Pinamar,Villa Gesell,Tigre,La Plata,Bahia Blanca,Tandil"
-```
-
-Otro ejemplo:
-
-```powershell
-python scraper_hoteles_places_api.py --place-type restaurant --search-terms "restaurant,parrilla,pizzeria" --coverage budget --max-api-requests 100
-```
-
-Para oficios donde Google no tenga un tipo exacto, podes dejar `--place-type` vacio y buscar por texto:
-
-```powershell
-python scraper_hoteles_places_api.py --place-type "" --search-terms "gasista matriculado,electricista matriculado,service aire acondicionado" --coverage balanced --max-api-requests 180
-```
-
-## 8. Archivos de salida
-
-- `negocios_sin_web_api.csv`: negocios sin sitio web.
-- `negocios_revisados_api.csv`: auditoria de todos los negocios encontrados.
-- `negocios_sin_web_api.txt`: telefonos en formato `telefono (nombre)`.
-- `cache/places_cache.json`: cache local para no pagar dos veces la misma busqueda.
-
-## 9. Instalacion
-
-El script de Places API usa solo librerias estandar de Python. No necesita Playwright ni paquetes externos.
-
-En esta maquina `python` ya funciona para este script.
-
-## 10. Alternativa vieja con scraping visual
-
-Tambien existe:
+## How it works
 
 ```text
-scraper_hoteles.py
+CLI
+ ↓
+Configuration / Presets / Geography
+ ↓
+Google Places Client
+ ↓
+Normalization
+ ↓
+Filtering + Lead Scoring
+ ↓
+CSV / JSON
 ```
 
-Ese script usa Playwright y scrapea Google Maps visualmente. Es menos confiable y puede omitir resultados.
+`--coverage` changes search breadth. `--fields` changes the Places field mask / billing SKU. Those are separate knobs.
 
-Nota: tu Python actual es MSYS2 (`C:\msys64\ucrt64\bin\python.exe`). Sirve para `scraper_hoteles_places_api.py`, pero puede dar problemas instalando Playwright. Si queres usar este scraper viejo, conviene instalar Python para Windows desde `python.org` y marcar **Add python.exe to PATH**.
+## Engineering highlights
 
-```powershell
+- Cost-aware field masks with honest SKU labels (`essentials` / `pro` / `enterprise`)
+- Text Search pagination that keeps the original query parameters
+- Retries with exponential backoff, jitter, and `Retry-After` for 429/5xx only
+- Deterministic lead scoring with a human-readable `lead_reason`
+- Country / region / locality queries (Buenos Aires is an optional geo preset, not a global assumption)
+- No persistent cache of Places content; Place IDs may be stored
+- HTTP-mocked pytest suite; Ruff and mypy in GitHub Actions without secrets
+
+## Install
+
+```bash
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m playwright install chromium
-.\.venv\Scripts\python.exe scraper_hoteles.py --all-buenos-aires-hotels
+source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+python -m pip install -e .
 ```
 
-Recomendacion: usa `scraper_hoteles_places_api.py` salvo que no quieras usar Google Places API.
+Development:
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+ruff check .
+mypy src/leadfinder
+```
+
+## Configure Google Places
+
+1. Enable **Places API (New)** in a Google Cloud project.
+2. Create an API key restricted to Places API (New). For this CLI, prefer IP restrictions (server-side).
+3. Copy `.env.example` to `.env` and replace the placeholder.
+
+```env
+GOOGLE_MAPS_API_KEY=your-places-api-key-here
+```
+
+`GOOGLE_PLACES_API_KEY` is also accepted. Keys are not taken as CLI flags.
+
+## Scoring, cost, and output
+
+Default field profile is `enterprise` because `websiteUri` is required to find missing websites. Dropping phone numbers does not lower the SKU if `websiteUri` is still requested.
+
+| Signal | Effect |
+| --- | --- |
+| No website | +40 |
+| Weak web presence | +20 |
+| Operational | +15 |
+| Has phone | +10 |
+| Review activity | +5 to +10 |
+| Closed temporarily / permanently | −20 / −50 |
+
+Permanently closed places are omitted by default. Exports go to `output/leads-<timestamp>.csv` and are not overwritten unless you pass `--force`. Sample rows in `examples/` are synthetic.
+
+## Compliance
+
+This tool is independent software and is not a Google product. Place data comes from Google Maps / Places and is subject to [Google’s Places API policies](https://developers.google.com/maps/documentation/places/web-service/policies) and Maps Platform terms. Place IDs may be stored; full Places records are not cached to skip billing. You are responsible for complying with applicable rules when contacting businesses.
+
+## License
+
+MIT. See `LICENSE`.
+
+## Migration from the old scripts
+
+| Old | New |
+| --- | --- |
+| `scraper_hoteles_places_api.py` | `leadfinder search` |
+| `--business-preset` | `--business` |
+| `--print-locations` | `leadfinder dry-run` |
+| `--api-key` | env / `.env` only |
+| Playwright Maps scraper | `legacy/` (unsupported, not installed by default) |

@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package and dev tools
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check .
+      - name: Tests
+        run: pytest
+        env:
+          # CI never talks to Google. Do not add API key secrets here.
+          GOOGLE_MAPS_API_KEY: ""
+      - name: Type check
+        run: mypy src/leadfinder

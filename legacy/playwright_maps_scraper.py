@@ -1,3 +1,8 @@
+"""UNSUPPORTED. Historical Google Maps UI scraper.
+
+This module is not part of leadfinder. Use `leadfinder search` and Places API (New).
+"""
+
 import argparse
 import csv
 import re
