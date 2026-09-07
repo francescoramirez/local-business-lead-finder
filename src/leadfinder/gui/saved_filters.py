@@ -90,3 +90,46 @@ def all_named_filters(settings: QSettings) -> dict[str, dict[str, Any]]:
     merged = dict(BUILTIN_FILTERS)
     merged.update(load_custom_filters(settings))
     return merged
+
+
+def merge_imported_filters(
+    existing: dict[str, dict[str, Any]], incoming: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    merged = dict(existing)
+    for name, spec in incoming.items():
+        key = name.strip()
+        if not key or not isinstance(spec, dict):
+            continue
+        if key not in merged:
+            merged[key] = spec
+            continue
+        imported = f"{key} (Imported)"
+        n = 2
+        while imported in merged:
+            imported = f"{key} (Imported {n})"
+            n += 1
+        merged[imported] = spec
+    return merged
+
+
+def filters_for_workspace(custom: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{"name": name, "filters": spec} for name, spec in custom.items()]
+
+
+def filters_from_workspace(payload: object) -> dict[str, dict[str, Any]]:
+    if isinstance(payload, dict) and "saved_filters" in payload:
+        payload = payload.get("saved_filters")
+    result: dict[str, dict[str, Any]] = {}
+    if isinstance(payload, list):
+        for item in payload:
+            if (
+                isinstance(item, dict)
+                and item.get("name")
+                and isinstance(item.get("filters"), dict)
+            ):
+                result[str(item["name"])] = item["filters"]
+    elif isinstance(payload, dict):
+        for name, spec in payload.items():
+            if isinstance(spec, dict):
+                result[str(name)] = spec
+    return result

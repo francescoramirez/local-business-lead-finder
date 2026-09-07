@@ -341,3 +341,44 @@ def test_unexpected_worker_logs_traceback(
     assert "unexpected-kaboom" in caplog.text
 
 
+def test_compare_and_undo_and_cost_preview(qapp, tmp_path: Path) -> None:
+    from PySide6.QtCore import QItemSelectionModel
+
+    from leadfinder.gui.compare_dialog import MAX_COMPARE, compare_rows
+
+    store = LocalLeadStore(tmp_path / "cmp.db")
+    service = LeadService(store)
+    window = MainWindow(service)
+    a = _managed(store, "ChIJ_SYNTHETIC_701", "Alpha Cafe")
+    b = _managed(store, "ChIJ_SYNTHETIC_702", "Beta Cafe")
+    window.model.set_leads([a, b])
+    window._update_empty_state()
+    window.table.selectRow(0)
+    window._on_selection()
+    assert not window.compare_btn.isEnabled()
+    window.table.selectionModel().select(
+        window.proxy.index(1, 0),
+        QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+    )
+    window._on_selection()
+    assert window.compare_btn.isEnabled()
+    rows = compare_rows([a, b], session=[a, b], local=store.list_all())
+    assert len(rows) == 2
+    assert rows[0][0] == "Alpha Cafe"
+    window.table.selectRow(0)
+    window._show_lead(a)
+    window.contact_status.setCurrentIndex(window.contact_status.findData("contacted"))
+    window._on_status_changed()
+    assert window.undo_btn.isEnabled()
+    window.undo_last()
+    restored = store.get("ChIJ_SYNTHETIC_701")
+    assert restored is not None
+    assert restored.contact_status == "new"
+    window.location.setText("Mar del Plata")
+    window._update_cost_preview()
+    assert "Estimated list cost" in window.cost_preview.text()
+    assert "page(s)" in window.cost_preview.text()
+    assert MAX_COMPARE == 5
+    window.close()
+
+

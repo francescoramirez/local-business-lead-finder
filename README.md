@@ -4,12 +4,13 @@ Cost-aware Python CLI and desktop app for discovering, qualifying, preparing, an
 
 [![CI](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml)
 
-Independent project. **Not affiliated with Google.** Version **1.1.0**.
+Independent project. **Not affiliated with Google.** Version **1.2.0**.
 
 **Stack:** Python 3.10+ · Google Places API (New) · Typer · Rich · PySide6 · SQLite · optional Groq · pytest · Ruff · mypy · GitHub Actions
 
 ```text
-Discover → Qualify → Track → Analyze → Improve
+Discover → Qualify → Track → Analyze → Learn
+Prepare → Decide → Act → Recover → Measure cost
 ```
 
 Local-first, single-user, privacy-conscious, explainable, **manual outreach**. Not a cloud CRM, spam engine, or predictive ML system.
@@ -51,13 +52,15 @@ Desktop tabs: **Search**, **Pipeline**, **Prospects**, **Dashboard**, **Learn** 
 
 **Qualification** — deterministic lead scoring and optional digital-presence checks (no crawl, no JavaScript).
 
-**Desktop workflow** — pipeline, follow-ups, activity history, campaigns, manual priority, saved filters, conservative duplicate hints. Outreach is always manual.
+**Desktop workflow** — pipeline, follow-ups, activity history, campaigns, manual priority, saved filters, conservative duplicate hints (in-session phone/domain plus historical name+locality), manual undo, pitch templates, lead compare. Outreach is always manual.
+
+**Cost** — local estimated Places Text Search **list-price** (not an invoice). Search planner compares 1/2/3 pages with no network. Campaign analytics show estimated list cost per discovered / high-opportunity lead when data exists.
 
 **Analytics** — snapshot (today) vs historical conversions. Insights rank segments vs baseline in **percentage points**. Experiments store a hypothesis and compare observed rate vs baseline without declaring scientific success/failure.
 
-**AI (optional)** — Groq Sales Prep for one selected lead after **Generate**. Insights/experiment explanations send **aggregates only**.
+**AI (optional)** — Groq Sales Prep for one selected lead after **Generate**. Optional selected pitch template is stylistic guidance only. Insights/experiment explanations send **aggregates only**.
 
-**Local data** — SQLite under the OS app-data directory (`platformdirs`). Backup / restore / workspace ZIP / `leadfinder doctor`. 1.1 hardens internals (storage/GUI split) without changing the local-first product.
+**Local data** — SQLite under the OS app-data directory (`platformdirs`). Backup / restore / workspace ZIP (format 1: templates + non-sensitive saved filters) / `leadfinder doctor`. `leadfinder demo-data --db PATH` seeds a disposable synthetic DB (refuses the default user file).
 
 ## Screenshots
 
@@ -68,7 +71,10 @@ docs/images/search.png
 docs/images/pipeline.png
 docs/images/analytics.png
 docs/images/insights.png
+docs/images/costs.png
 ```
+
+No fabricated UI images are in the repo. Capture the real GUI at 1366×768; see [docs/images/README.md](docs/images/README.md).
 
 ## Architecture
 
@@ -100,7 +106,11 @@ Optional. Discovery, scoring, and tracking work with no Groq key. Sales Prep is 
 
 ## Google Places
 
-Default field profile is `enterprise` because `websiteUri` is required to find missing websites. You are responsible for Places API billing, attribution, and contact rules.
+Default field profile is `enterprise` because `websiteUri` is required to find missing websites. `websiteUri`, phone, and rating bill **Text Search Enterprise** (list $35 / 1,000 in the first PAYG band), not Pro.
+
+LeadFinder estimates Google Places **list-price** usage from completed page requests and the field mask SKU. It does not read Google Cloud Billing and cannot know actual invoiced cost (free usage, subscriptions, credits, other projects, retries, taxes).
+
+You are responsible for Places API billing, attribution, and contact rules.
 
 ```env
 GOOGLE_MAPS_API_KEY=your-places-api-key-here

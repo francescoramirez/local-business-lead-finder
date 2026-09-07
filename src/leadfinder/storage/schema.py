@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 9
 
 _V1_LEADS = """
 CREATE TABLE IF NOT EXISTS leads_local (
@@ -187,6 +187,39 @@ def migrate(conn: sqlite3.Connection) -> int:
     if version < 7:
         _add_column(conn, "leads_local", "manual_priority TEXT NOT NULL DEFAULT 'normal'")
         version = 7
+        _set_version(conn, version)
+    if version < 8:
+        _add_column(conn, "activities", "metadata_json TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "activities", "reverses_activity_id INTEGER")
+        _add_column(conn, "search_runs", "request_count INTEGER")
+        _add_column(conn, "search_runs", "field_profile TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "search_runs", "pages INTEGER NOT NULL DEFAULT 0")
+        _add_column(conn, "search_runs", "estimated_cost TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "search_runs", "pricing_version TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "search_runs", "currency TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "search_runs", "cost_status TEXT NOT NULL DEFAULT 'unknown'")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS pitch_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                business_type TEXT NOT NULL DEFAULT '',
+                presence_type TEXT NOT NULL DEFAULT '',
+                language TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_pitch_templates_name ON pitch_templates(name);
+            CREATE INDEX IF NOT EXISTS idx_activities_reverses
+                ON activities(reverses_activity_id);
+            """
+        )
+        version = 8
+        _set_version(conn, version)
+    if version < 9:
+        _add_column(conn, "search_runs", "billing_sku TEXT NOT NULL DEFAULT ''")
+        version = 9
         _set_version(conn, version)
     conn.commit()
     return version

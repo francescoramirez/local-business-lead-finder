@@ -173,10 +173,14 @@ def _build_config(
     )
 
 
-def _print_plan(plan: SearchPlan) -> None:
+def _print_plan(plan: SearchPlan, *, max_requests: int) -> None:
+    from leadfinder.costs.estimator import estimate_plan, page_scenarios
+    from leadfinder.costs.models import format_estimate
+
     table = Table(title="Dry run", show_header=True, header_style="bold")
     table.add_column("Item")
     table.add_column("Value")
+    estimate = estimate_plan(plan)
     rows = [
         ("Business preset", plan.business),
         ("Search terms", ", ".join(plan.search_terms)),
@@ -195,15 +199,26 @@ def _print_plan(plan: SearchPlan) -> None:
         ("Only no website", "yes" if plan.only_no_website else "no"),
         ("Include closed", "yes" if plan.include_closed else "no"),
         ("Analyze websites", "yes" if plan.analyze_websites else "no"),
+        ("Billing SKU", estimate.billing_sku or plan.billing_tier),
+        ("Estimated list cost", format_estimate(estimate).replace("Estimated list cost: ", "")),
+        ("Pricing catalog", estimate.pricing_version),
     ]
     for label, value in rows:
         table.add_row(label, value)
     console.print(table)
+    console.print("Page comparison (no network):")
+    for pages, requests, cost in page_scenarios(
+        query_count=plan.max_queries,
+        max_requests=max_requests,
+        field_profile=plan.field_profile,
+    ):
+        console.print(f"  {pages} page(s): {requests} requests · {format_estimate(cost)}")
     console.print("Locations:")
     for location in plan.locations:
         console.print(f"  - {location}")
     console.print(
-        "\nNo API requests were made. Data from Google Maps, if fetched later, must be attributed."
+        "\nNo API requests were made. Estimated list cost is not an invoice. "
+        "Data from Google Maps, if fetched later, must be attributed."
     )
 
 
@@ -212,7 +227,8 @@ def _print_summary(report: SearchReport) -> None:
     table.add_column("Metric")
     table.add_column("Value", justify="right")
     table.add_row("Queries executed", str(report.queries_executed))
-    table.add_row("API requests", str(report.api_requests))
+    table.add_row("Completed page requests", str(report.api_requests))
+    table.add_row("HTTP attempts", str(report.http_attempts))
     table.add_row("In-run cache hits", str(report.cache_hits))
     table.add_row("Places found", str(report.places_found))
     table.add_row("Duplicates discarded", str(report.duplicates_discarded))
@@ -307,7 +323,7 @@ def dry_run_command(
             seen_ids,
             test,
         )
-        _print_plan(build_plan(config))
+        _print_plan(build_plan(config), max_requests=config.max_requests)
     except LeadFinderError as error:
         err_console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1) from error
@@ -628,6 +644,71 @@ def restore_command(
     except LeadFinderError as error:
         err_console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1) from error
+
+
+@app.command("templates")
+def templates_command() -> None:
+    """List local pitch templates. No network."""
+    from leadfinder.application.service import LeadService
+
+    rows = LeadService().list_templates()
+    if not rows:
+        console.print("No pitch templates yet. Create them in the GUI Sales Prep tab.")
+        return
+    table = Table(title="Pitch templates", show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Updated")
+    for item in rows:
+        table.add_row(str(item.id), item.name, item.updated_at)
+    console.print(table)
+
+
+@app.command("costs")
+def costs_command() -> None:
+    """Show the local Places pricing catalog and campaign estimates. No network."""
+    from leadfinder.application.service import LeadService
+    from leadfinder.costs.aggregation import format_campaign_costs, summarize_campaign_costs
+    from leadfinder.costs.pricing import default_catalog
+
+    catalog = default_catalog()
+    console.print(
+        f"Pricing catalog {catalog.version} ({catalog.currency}, "
+        f"reference {catalog.reference_date}, verified {catalog.verified_at})"
+    )
+    console.print(catalog.source)
+    for sku, rate in catalog.rates_per_thousand.items():
+        label = catalog.sku_labels.get(sku, sku)
+        console.print(f"  {label}: {catalog.currency} {rate} list per 1,000")
+    service = LeadService()
+    report = service.analytics_report(service.analytics_period(days=None))
+    console.print(
+        format_campaign_costs(
+            summarize_campaign_costs(
+                service.store.list_searches(limit=0),
+                campaign_id=0,
+                discovered_leads=report.historical.total_leads,
+                high_opportunity_leads=report.snapshot.high_opportunity,
+                interested_once=report.historical.interested_once,
+                won_once=report.historical.won_once,
+            )
+        )
+    )
+
+
+@app.command("demo-data")
+def demo_data_command(
+    db: Annotated[Path, typer.Option("--db", help="SQLite path. Refuses the default user DB.")],
+) -> None:
+    """Write a synthetic demo database. Refuses the default user DB."""
+    from leadfinder.demo import seed_demo_database
+
+    try:
+        written = seed_demo_database(db)
+    except LeadFinderError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+    console.print(f"Demo database written to {written}")
 
 
 @app.command("doctor")

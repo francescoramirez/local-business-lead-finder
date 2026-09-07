@@ -7,7 +7,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from leadfinder.errors import ConfigError, MissingApiKeyError
-from leadfinder.fields import DEFAULT_FIELD_PROFILE, FieldProfile, get_field_profile
+from leadfinder.fields import (
+    DEFAULT_FIELD_PROFILE,
+    FieldProfile,
+    billing_tier_for_mask,
+    get_field_profile,
+)
 from leadfinder.geography import (
     language_for_country,
     normalize_country,
@@ -132,7 +137,7 @@ class SearchConfig:
             coverage=self.coverage,
             field_profile=profile.name,
             field_mask=profile.mask,
-            billing_tier=profile.billing_tier,
+            billing_tier=billing_tier_for_mask(profile.mask),
             page_size=self.page_size,
             pages=self.pages,
             max_queries=max_queries,

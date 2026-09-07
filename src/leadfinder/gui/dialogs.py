@@ -185,3 +185,44 @@ class ExperimentDialog(QDialog):
         layout.addWidget(hint)
         layout.addLayout(form)
         layout.addWidget(box)
+
+
+class TemplateDialog(QDialog):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        name: str = "",
+        body: str = "",
+        business_type: str = "",
+        presence_type: str = "",
+        language: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Pitch template")
+        self.name = QLineEdit(name)
+        self.body = QTextEdit()
+        self.body.setPlainText(body)
+        self.business_type = QLineEdit(business_type)
+        self.presence_type = QLineEdit(presence_type)
+        self.language = QLineEdit(language)
+        form = QFormLayout()
+        form.addRow("Name", self.name)
+        form.addRow("Body", self.body)
+        form.addRow("Business type", self.business_type)
+        form.addRow("Presence type", self.presence_type)
+        form.addRow("Language", self.language)
+        hint = QLabel(
+            "Placeholders: {business_name} {business_type} {location} {region} "
+            "{country} {presence_type} {opportunity_level}. Missing tokens stay visible."
+        )
+        hint.setWordWrap(True)
+        box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(hint)
+        layout.addLayout(form)
+        layout.addWidget(box)

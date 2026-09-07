@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from leadfinder.analytics import AnalyticsReport, format_rate
 from leadfinder.application.service import LeadService
+from leadfinder.costs.models import LIST_COST_DISCLAIMER
 from leadfinder.models import Campaign
 
 
@@ -63,6 +64,10 @@ class AnalyticsPage(QWidget):
         self.compare.setReadOnly(True)
         self.observations = QLabel("")
         self.observations.setWordWrap(True)
+        self.cost_label = QLabel("")
+        self.cost_label.setObjectName("hint")
+        self.cost_label.setWordWrap(True)
+        self.cost_label.setToolTip(LIST_COST_DISCLAIMER)
         self.export_btn = QPushButton("Export report")
         self.refresh_btn = QPushButton("Refresh")
 
@@ -102,6 +107,10 @@ class AnalyticsPage(QWidget):
         cmp_layout = QVBoxLayout(cmp_box)
         cmp_layout.addWidget(self.compare)
         layout.addWidget(cmp_box)
+        costs = QGroupBox("Campaign API estimate")
+        costs_layout = QVBoxLayout(costs)
+        costs_layout.addWidget(self.cost_label)
+        layout.addWidget(costs)
         layout.addWidget(self.observations)
 
     def selected_campaign_id(self) -> int | None:
@@ -129,7 +138,9 @@ class AnalyticsPage(QWidget):
         if self.compare_b.count() > 1:
             self.compare_b.setCurrentIndex(1)
 
-    def show_report(self, report: AnalyticsReport, comparison: str = "") -> None:
+    def show_report(
+        self, report: AnalyticsReport, comparison: str = "", cost_text: str = ""
+    ) -> None:
         empty = report.historical.total_leads == 0
         self.empty.setVisible(empty)
         hist = report.historical
@@ -179,6 +190,7 @@ class AnalyticsPage(QWidget):
             )
         self.segments.setPlainText("\n\n".join(blocks))
         self.compare.setPlainText(comparison)
+        self.cost_label.setText(cost_text or "Estimated list cost: Unknown")
         self.observations.setText("\n".join(report.observations))
 
 

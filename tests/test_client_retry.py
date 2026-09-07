@@ -46,6 +46,8 @@ def test_retries_429_and_respects_retry_after() -> None:
     )
     assert result.places[0]["id"] == "ChIJ_SYNTHETIC_001"
     assert sleeps == [2.0]
+    assert result.api_requests == 1
+    assert result.http_attempts == 2
 
 
 def test_retries_server_errors() -> None:
@@ -67,6 +69,7 @@ def test_retries_server_errors() -> None:
         region_code="US",
     )
     assert result.api_requests == 1
+    assert result.http_attempts == 3
     assert calls["count"] == 3
 
 

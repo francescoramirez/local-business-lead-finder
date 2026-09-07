@@ -64,6 +64,7 @@ def run_search(
     checked: dict[str, Lead] = {}
     query_cache: dict[str, list[dict[str, Any]]] = {}
     api_requests = 0
+    http_attempts = 0
     cache_hits = 0
     places_found = 0
     duplicates = 0
@@ -120,6 +121,7 @@ def run_search(
                     remaining_requests=remaining,
                 )
                 api_requests += result.api_requests
+                http_attempts += result.http_attempts
                 places = result.places
                 query_cache[cache_key] = places
                 if config.delay:
@@ -188,6 +190,7 @@ def run_search(
         no_website=sum(1 for lead in leads if not lead.has_website),
         contactable=sum(1 for lead in leads if lead.contactable),
         cancelled=cancelled,
+        http_attempts=http_attempts,
     )
 
 

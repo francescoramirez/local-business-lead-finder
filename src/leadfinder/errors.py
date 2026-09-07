@@ -63,6 +63,14 @@ class WorkspaceError(LeadFinderError):
     pass
 
 
+class UndoError(LeadFinderError):
+    pass
+
+
+class TemplateError(LeadFinderError):
+    pass
+
+
 class DatabaseError(LeadFinderError):
     pass
 

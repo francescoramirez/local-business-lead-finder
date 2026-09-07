@@ -43,6 +43,7 @@ def row_to_state(row: sqlite3.Row) -> LocalLeadState:
 
 
 def row_to_activity(row: sqlite3.Row) -> Activity:
+    keys = set(row.keys())
     return Activity(
         id=int(row["id"]),
         place_id=row["place_id"],
@@ -51,6 +52,10 @@ def row_to_activity(row: sqlite3.Row) -> Activity:
         note=row["note"],
         contact_method=row["contact_method"],
         outcome=row["outcome"],
+        metadata_json=row["metadata_json"] if "metadata_json" in keys else "",
+        reverses_activity_id=int(row["reverses_activity_id"] or 0)
+        if "reverses_activity_id" in keys
+        else 0,
     )
 
 
@@ -66,6 +71,14 @@ def row_to_search(row: sqlite3.Row) -> SearchRun:
         lead_count=int(row["lead_count"]),
         high_opportunity_count=int(row["high_opportunity_count"]),
         campaign_id=int(row["campaign_id"] or 0) if "campaign_id" in keys else 0,
+        request_count=int(row["request_count"] or 0) if "request_count" in keys else 0,
+        field_profile=row["field_profile"] if "field_profile" in keys else "",
+        pages=int(row["pages"] or 0) if "pages" in keys else 0,
+        estimated_cost=row["estimated_cost"] if "estimated_cost" in keys else "",
+        pricing_version=row["pricing_version"] if "pricing_version" in keys else "",
+        currency=row["currency"] if "currency" in keys else "",
+        cost_status=row["cost_status"] if "cost_status" in keys else "unknown",
+        billing_sku=row["billing_sku"] if "billing_sku" in keys else "",
     )
 
 

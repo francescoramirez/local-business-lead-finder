@@ -21,6 +21,8 @@ class ActivitiesMixin:
         contact_method: str = "",
         outcome: str = "",
         created_at: str | None = None,
+        metadata_json: str = "",
+        reverses_activity_id: int = 0,
         commit: bool = True,
     ) -> Activity:
         self.mark_seen(place_id, seen_at=created_at, commit=False)  # type: ignore[attr-defined]
@@ -31,6 +33,8 @@ class ActivitiesMixin:
             note=note,
             contact_method=contact_method,
             outcome=outcome,
+            metadata_json=metadata_json,
+            reverses_activity_id=reverses_activity_id,
         )
         if commit:
             self._conn.commit()
@@ -49,15 +53,27 @@ class ActivitiesMixin:
         note: str = "",
         contact_method: str = "",
         outcome: str = "",
+        metadata_json: str = "",
+        reverses_activity_id: int = 0,
     ) -> int:
         stamp = created_at or to_iso(utc_now())
         cursor = self._conn.execute(
             """
             INSERT INTO activities (
-                place_id, activity_type, created_at, note, contact_method, outcome
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                place_id, activity_type, created_at, note, contact_method, outcome,
+                metadata_json, reverses_activity_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (place_id, activity_type, stamp, note, contact_method, outcome),
+            (
+                place_id,
+                activity_type,
+                stamp,
+                note,
+                contact_method,
+                outcome,
+                metadata_json,
+                reverses_activity_id or None,
+            ),
         )
         self._conn.execute(
             "UPDATE leads_local SET last_activity_at = ? WHERE place_id = ?",

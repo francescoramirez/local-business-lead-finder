@@ -22,6 +22,9 @@ def test_help_lists_main_commands() -> None:
     assert "insights" in result.stdout
     assert "experiments" in result.stdout
     assert "doctor" in result.stdout
+    assert "templates" in result.stdout
+    assert "costs" in result.stdout
+    assert "demo-data" in result.stdout
 
 
 def test_presets_lists_business_types() -> None:
@@ -52,6 +55,8 @@ def test_dry_run_works_without_api_key() -> None:
     assert "Text Search Enterprise" in result.stdout
     assert "Mar del Plata" in result.stdout
     assert "No API requests were made" in result.stdout
+    assert "Estimated list cost" in result.stdout
+    assert "page(s)" in result.stdout
 
 
 def test_analyze_classifies_social_without_http() -> None:

@@ -160,6 +160,7 @@ def test_anti_hallucination_prompt_contains_constraints() -> None:
         "observed signals from suggestions",
         "Do not promise SEO",
         "suggested drafts",
+        "selected_template",
     ):
         assert needle.lower() in text.lower() or needle in text
 

@@ -115,6 +115,7 @@ class SalesPrepWorker(QThread):
         *,
         language: str,
         model: str = "",
+        template_body: str = "",
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -122,6 +123,7 @@ class SalesPrepWorker(QThread):
         self._item = item
         self._language = language
         self._model = model
+        self._template_body = template_body
 
     def run(self) -> None:
         try:
@@ -129,6 +131,7 @@ class SalesPrepWorker(QThread):
                 self._item,
                 language=self._language,
                 model=self._model,
+                template_body=self._template_body,
             )
             self.succeeded.emit(result)
         except Exception as error:  # noqa: BLE001

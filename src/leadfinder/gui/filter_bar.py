@@ -60,6 +60,8 @@ class FilterBar(QWidget):
         self.filter_tag.setMaximumWidth(120)
         self.saved_filters = QComboBox()
         self.save_filter_btn = QPushButton("Save filter")
+        self.compare_btn = QPushButton("Compare selected")
+        self.compare_btn.setEnabled(False)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -78,3 +80,4 @@ class FilterBar(QWidget):
         layout.addWidget(self.filter_status)
         layout.addWidget(self.saved_filters)
         layout.addWidget(self.save_filter_btn)
+        layout.addWidget(self.compare_btn)

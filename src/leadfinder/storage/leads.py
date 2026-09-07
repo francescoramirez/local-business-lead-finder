@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 
@@ -181,6 +182,7 @@ class LeadsMixin:
         *,
         now: datetime | None = None,
         commit: bool = True,
+        undo_of: int = 0,
     ) -> LocalLeadState:
         if status not in CONTACT_STATUSES:
             raise ValueError(f"Unknown contact status: {status}")
@@ -209,6 +211,16 @@ class LeadsMixin:
             created_at=stamp,
             note=f"Status changed → {old.replace('_', ' ')} to {status.replace('_', ' ')}",
             outcome=status,
+            metadata_json=json.dumps(
+                {
+                    "field": "contact_status",
+                    "previous_value": old,
+                    "new_value": status,
+                    "reason": "undo" if undo_of else "",
+                    "undo_of": str(undo_of) if undo_of else "",
+                }
+            ),
+            reverses_activity_id=undo_of,
         )
         if commit:
             self._conn.commit()
@@ -250,14 +262,32 @@ class LeadsMixin:
         priority: str,
         *,
         commit: bool = True,
+        undo_of: int = 0,
     ) -> LocalLeadState:
         if priority not in MANUAL_PRIORITIES:
             raise ValueError(f"Unknown manual priority: {priority}")
-        self.mark_seen(place_id, commit=False)
+        existing = self.mark_seen(place_id, commit=False)
+        previous = existing.manual_priority
         self._conn.execute(
             "UPDATE leads_local SET manual_priority = ? WHERE place_id = ?",
             (priority, place_id),
         )
+        if previous != priority:
+            self._add_activity(  # type: ignore[attr-defined]
+                place_id,
+                ActivityType.PRIORITY_CHANGE.value,
+                note=f"Priority {previous} -> {priority}",
+                metadata_json=json.dumps(
+                    {
+                        "field": "manual_priority",
+                        "previous_value": previous,
+                        "new_value": priority,
+                        "reason": "undo" if undo_of else "",
+                        "undo_of": str(undo_of) if undo_of else "",
+                    }
+                ),
+                reverses_activity_id=undo_of,
+            )
         if commit:
             self._conn.commit()
         state = self.get(place_id)
@@ -271,9 +301,11 @@ class LeadsMixin:
         *,
         now: datetime | None = None,
         commit: bool = True,
+        undo_of: int = 0,
     ) -> LocalLeadState:
         stamp = to_iso(utc_now(now))
-        self.mark_seen(place_id, seen_at=stamp, commit=False)
+        existing = self.mark_seen(place_id, seen_at=stamp, commit=False)
+        previous = existing.next_follow_up_at
         self._conn.execute(
             "UPDATE leads_local SET next_follow_up_at = ? WHERE place_id = ?",
             (when, place_id),
@@ -284,6 +316,16 @@ class LeadsMixin:
             ActivityType.FOLLOW_UP.value,
             created_at=stamp,
             note=note,
+            metadata_json=json.dumps(
+                {
+                    "field": "next_follow_up_at",
+                    "previous_value": previous,
+                    "new_value": when,
+                    "reason": "undo" if undo_of else "",
+                    "undo_of": str(undo_of) if undo_of else "",
+                }
+            ),
+            reverses_activity_id=undo_of,
         )
         if commit:
             self._conn.commit()

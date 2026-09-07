@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from leadfinder.fields import billing_tier_for_mask, get_field_profile
+from leadfinder.fields import billing_sku_for_field_mask, billing_tier_for_mask, get_field_profile
 
 
 def test_enterprise_profile_includes_website() -> None:
@@ -25,3 +25,5 @@ def test_essentials_is_id_only() -> None:
     profile = get_field_profile("essentials")
     assert profile.mask == "places.id,places.name,nextPageToken"
     assert billing_tier_for_mask(profile.mask) == "Text Search Essentials (IDs Only)"
+    assert billing_sku_for_field_mask(profile.mask) == "text_search_essentials_ids_only"
+    assert billing_sku_for_field_mask("places.id") == "text_search_essentials_ids_only"

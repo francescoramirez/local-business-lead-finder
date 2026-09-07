@@ -113,9 +113,10 @@ def test_duplicate_hints_conservative() -> None:
         )
     )
     session = [a, b, c, d, e]
-    assert duplicate_hint(a, session) == "Possible duplicate"
+    assert "Possible duplicate" in duplicate_hint(a, session)
     assert duplicate_hint(c, session) == ""
-    assert duplicate_hint(d, session) == "Possible duplicate"
+    assert "Possible duplicate" in duplicate_hint(d, session)
+    assert "Same name and locality" in duplicate_hint(d, session)
     assert duplicate_hint(e, session) == ""
     same_name_city = ManagedLead(
         lead=_lead(
@@ -126,7 +127,8 @@ def test_duplicate_hints_conservative() -> None:
             source_location="Example City",
         )
     )
-    assert duplicate_hint(same_name_city, session + [same_name_city]) == "Possible duplicate"
+    hint = duplicate_hint(same_name_city, session + [same_name_city])
+    assert hint.startswith("Possible duplicate")
 
 
 def test_empty_phone_is_not_a_duplicate() -> None:

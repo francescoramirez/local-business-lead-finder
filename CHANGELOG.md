@@ -2,6 +2,29 @@
 
 All notable LeadFinder versions. Dates are omitted when they cannot be derived from the repository.
 
+## 1.2.0
+
+### Added
+
+- Safe workflow undo for the latest status, follow-up, or manual priority change. History is never deleted; undo writes an inverse activity.
+- Historical duplicate hints using allowed local metadata (normalized name + locality). Phone/website remain session-only.
+- Saved filters travel in workspace ZIP (`settings-non-sensitive.json`) with merge names such as `Best prospects (Imported)`.
+- Manual pitch templates in SQLite, `{placeholder}` rendering (missing tokens stay visible), GUI picker, optional Groq style context.
+- Local Places **list-price** estimates (Decimal, USD catalog `google_places_text_search_new_2026_08`) on dry-run, search summary, and campaign analytics. SKU is derived from the field mask, not from the product profile name.
+- Search planner: 1/2/3 page request/cost preview with no network.
+- Compare 2–5 selected leads. Context menu quick actions (contacted, follow-up, priority high, copy phone, open website, copy pitch).
+- `leadfinder demo-data --db`, `templates`, and `costs` CLI helpers.
+
+### Changed
+
+- Schema v8–v9: activity undo metadata, search-run cost fields and `billing_sku`, `pitch_templates`. Workspace format stays **1** with optional files.
+- Dry-run CLI/GUI output includes estimated list cost. Doctor reports pricing catalog version, reference date, and verified-at. Field-mask SKU mapping: IDs-only $0 list / Pro $32 / Enterprise $35 / Enterprise+Atmosphere $40 per 1,000 (first PAYG band). Monthly free usage is not subtracted.
+
+### Fixed
+
+- Incorrect Places list-price mapping that treated product field-profile names as SKUs (essentials/pro/enterprise as $32/$35/$40). Costs now use mask-derived SKUs.
+- Duplicate hint text now states the matching reason (phone, domain, or name+locality) instead of a single generic line.
+
 ## 1.1.0
 
 ### Added

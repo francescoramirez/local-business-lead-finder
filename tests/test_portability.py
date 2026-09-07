@@ -84,7 +84,8 @@ def test_doctor_on_healthy_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     text = format_doctor(report)
     assert "LeadFinder Doctor" in text
     assert "Database" in text
-    assert "v7" in text
+    assert f"v{store.schema_version}" in text
+    assert "Pricing catalog" in text
     assert "gsk_" not in text.lower()
     assert "aiza" not in text.lower()
     assert report.ok()

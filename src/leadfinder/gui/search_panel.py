@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from leadfinder.costs.models import LIST_COST_DISCLAIMER
 from leadfinder.fields import FIELD_PROFILES
 from leadfinder.presets import list_presets
 
@@ -82,6 +83,7 @@ class SearchPanel(QWidget):
         self.cost_preview = QLabel("Dry Run to preview request volume.")
         self.cost_preview.setObjectName("hint")
         self.cost_preview.setWordWrap(True)
+        self.cost_preview.setToolTip(LIST_COST_DISCLAIMER)
         cost_form.addRow(self.cost_preview)
         cost_box = QGroupBox("Cost and volume")
         cost_box.setLayout(cost_form)

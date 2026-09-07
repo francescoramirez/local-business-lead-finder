@@ -57,6 +57,7 @@ class ActivityType(str, Enum):
     STATUS_CHANGE = "status_change"
     DISCOVERED = "discovered"
     SALES_PREP_SAVED = "sales_prep_saved"
+    PRIORITY_CHANGE = "priority_change"
 
 
 ACTIVITY_TYPE_LABELS: dict[str, str] = {
@@ -68,6 +69,7 @@ ACTIVITY_TYPE_LABELS: dict[str, str] = {
     ActivityType.STATUS_CHANGE.value: "Status change",
     ActivityType.DISCOVERED.value: "Lead discovered",
     ActivityType.SALES_PREP_SAVED.value: "Sales prep saved",
+    ActivityType.PRIORITY_CHANGE.value: "Priority change",
 }
 
 CONTACT_METHODS: tuple[str, ...] = (

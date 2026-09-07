@@ -31,6 +31,7 @@ class SalesPrepRequest:
     operational: bool
     language: str = DEFAULT_OUTPUT_LANGUAGE
     prompt_version: str = PROMPT_VERSION
+    selected_template: str = ""
 
     def to_payload(self) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -52,6 +53,8 @@ class SalesPrepRequest:
             "operational": self.operational,
             "language": self.language,
         }
+        if self.selected_template.strip():
+            payload["selected_template"] = self.selected_template.strip()[:2000]
         return payload
 
 

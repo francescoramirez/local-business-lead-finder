@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from leadfinder.ai.models import DEFAULT_GROQ_MODEL, DEFAULT_OUTPUT_LANGUAGE, SalesPrepResult
 from leadfinder.ai.provider import ai_configured, groq_model
+from leadfinder.gui.pitch_panel import PitchTemplatePanel
 
 
 class SalesPrepPanel(QWidget):
@@ -88,10 +89,13 @@ class SalesPrepPanel(QWidget):
         copy.addWidget(self.copy_full_btn)
         copy.addWidget(self.save_notes_btn)
 
+        self.pitch = PitchTemplatePanel()
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.status)
         layout.addWidget(self.notice)
+        layout.addWidget(self.pitch)
         layout.addLayout(form)
         layout.addLayout(buttons)
         layout.addWidget(self.busy)

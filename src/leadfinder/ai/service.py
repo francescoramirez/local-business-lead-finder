@@ -31,7 +31,9 @@ FORBIDDEN_REQUEST_KEYS = frozenset(
 )
 
 
-def build_sales_prep_request(item: ManagedLead, *, language: str) -> SalesPrepRequest:
+def build_sales_prep_request(
+    item: ManagedLead, *, language: str, template_body: str = ""
+) -> SalesPrepRequest:
     lead = item.lead
     return SalesPrepRequest(
         name=lead.name or item.label,
@@ -51,6 +53,7 @@ def build_sales_prep_request(item: ManagedLead, *, language: str) -> SalesPrepRe
         tags=item.tags,
         operational=lead.operational,
         language=language,
+        selected_template=template_body.strip()[:2000],
     )
 
 
@@ -75,8 +78,9 @@ def generate_sales_prep(
     language: str,
     model: str = "",
     provider: AIProvider | None = None,
+    template_body: str = "",
 ) -> SalesPrepResult:
-    request = build_sales_prep_request(item, language=language)
+    request = build_sales_prep_request(item, language=language, template_body=template_body)
     assert_minimized(request.to_payload())
     engine = provider or GroqProvider(model=groq_model(model))
     return engine.generate_sales_prep(request)

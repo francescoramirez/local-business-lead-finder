@@ -20,6 +20,9 @@ Hard rules:
 - Do not use fake urgency, threats, or pretend to be a customer or existing partner.
 - Do not frame the current digital presence as "bad"; be respectful.
 - Opening messages are suggested drafts for the user to review, not send automatically.
+- If selected_template is present, use it as stylistic/commercial guidance only.
+  Do not invent facts to fill the template.
+  Do not replace the user's template with a sendable message.
 - Write in the requested language.
 - Return a single JSON object with exactly these keys:
   opportunity_summary (string),

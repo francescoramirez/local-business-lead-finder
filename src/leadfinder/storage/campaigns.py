@@ -24,14 +24,24 @@ class CampaignsMixin:
         created_at: str | None = None,
         campaign_id: int = 0,
         commit: bool = True,
+        request_count: int = 0,
+        field_profile: str = "",
+        pages: int = 0,
+        estimated_cost: str = "",
+        pricing_version: str = "",
+        currency: str = "",
+        cost_status: str = "unknown",
+        billing_sku: str = "",
     ) -> SearchRun:
         stamp = created_at or to_iso(utc_now())
         cursor = self._conn.execute(
             """
             INSERT INTO search_runs (
                 created_at, business_preset, location, region, country,
-                lead_count, high_opportunity_count, campaign_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                lead_count, high_opportunity_count, campaign_id,
+                request_count, field_profile, pages, estimated_cost,
+                pricing_version, currency, cost_status, billing_sku
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 stamp,
@@ -42,6 +52,14 @@ class CampaignsMixin:
                 lead_count,
                 high_opportunity_count,
                 campaign_id or None,
+                request_count or None,
+                field_profile,
+                pages,
+                estimated_cost,
+                pricing_version,
+                currency,
+                cost_status,
+                billing_sku,
             ),
         )
         if commit:
@@ -56,13 +74,26 @@ class CampaignsMixin:
             lead_count=lead_count,
             high_opportunity_count=high_opportunity_count,
             campaign_id=campaign_id,
+            request_count=request_count,
+            field_profile=field_profile,
+            pages=pages,
+            estimated_cost=estimated_cost,
+            pricing_version=pricing_version,
+            currency=currency,
+            cost_status=cost_status,
+            billing_sku=billing_sku,
         )
 
     def list_searches(self, *, limit: int = 20) -> list[SearchRun]:
-        cursor = self._conn.execute(
-            "SELECT * FROM search_runs ORDER BY created_at DESC, id DESC LIMIT ?",
-            (limit,),
-        )
+        if limit <= 0:
+            cursor = self._conn.execute(
+                "SELECT * FROM search_runs ORDER BY created_at DESC, id DESC"
+            )
+        else:
+            cursor = self._conn.execute(
+                "SELECT * FROM search_runs ORDER BY created_at DESC, id DESC LIMIT ?",
+                (limit,),
+            )
         return [row_to_search(row) for row in cursor.fetchall()]
 
     def create_campaign(

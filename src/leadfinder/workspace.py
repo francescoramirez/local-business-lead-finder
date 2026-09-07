@@ -80,10 +80,24 @@ def export_workspace(
             "note": item.note,
             "contact_method": item.contact_method,
             "outcome": item.outcome,
+            "metadata_json": item.metadata_json,
+            "reverses_activity_id": item.reverses_activity_id,
         }
         for item in store.list_all_activities()
     ]
     experiments = [item.as_dict() for item in store.list_experiments()]
+    templates = [
+        {
+            "name": item.name,
+            "body": item.body,
+            "business_type": item.business_type,
+            "presence_type": item.presence_type,
+            "language": item.language,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+        }
+        for item in store.list_templates()
+    ]
     safe_settings = {
         key: value
         for key, value in (settings or {}).items()
@@ -97,6 +111,7 @@ def export_workspace(
         archive.writestr("campaigns.json", _dump(campaigns))
         archive.writestr("activities.json", _dump(activities))
         archive.writestr("experiments.json", _dump(experiments))
+        archive.writestr("pitch_templates.json", _dump(templates))
         archive.writestr("settings-non-sensitive.json", _dump(safe_settings))
     return destination
 
@@ -126,7 +141,7 @@ def _state_export(item: LocalLeadState) -> dict[str, object]:
     }
 
 
-def import_workspace(store: object, source: Path) -> dict[str, int]:
+def import_workspace(store: object, source: Path) -> dict[str, Any]:
     from leadfinder.storage.local_leads import LocalLeadStore
 
     if not isinstance(store, LocalLeadStore):
@@ -159,18 +174,39 @@ def import_workspace(store: object, source: Path) -> dict[str, int]:
             if "experiments.json" in names
             else []
         )
-    blob = json.dumps([manifest, workflow, campaigns, activities, experiments])
+        templates = (
+            _load_json(archive.read("pitch_templates.json"), "pitch_templates.json")
+            if "pitch_templates.json" in names
+            else []
+        )
+        extra_settings = (
+            _load_json(
+                archive.read("settings-non-sensitive.json"),
+                "settings-non-sensitive.json",
+            )
+            if "settings-non-sensitive.json" in names
+            else {}
+        )
+    blob = json.dumps(
+        [manifest, workflow, campaigns, activities, experiments, templates, extra_settings]
+    )
     _reject_secrets(blob)
     if not isinstance(workflow, list) or not isinstance(campaigns, list):
         raise WorkspaceError("Workspace JSON must be lists of records.")
     if not isinstance(activities, list) or not isinstance(experiments, list):
         raise WorkspaceError("Workspace JSON must be lists of records.")
-    return store.merge_workspace(
+    if not isinstance(templates, list):
+        raise WorkspaceError("Workspace JSON must be lists of records.")
+    added = store.merge_workspace(
         workflow=workflow,
         campaigns=campaigns,
         activities=activities,
         experiments=experiments,
+        templates=templates,
     )
+    result: dict[str, Any] = dict(added)
+    result["imported_saved_filters"] = extra_settings if isinstance(extra_settings, dict) else {}
+    return result
 
 
 def criteria_from_insight(dimension: str, key: str) -> dict[str, str]:

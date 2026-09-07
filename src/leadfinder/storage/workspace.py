@@ -19,8 +19,16 @@ class WorkspaceMixin:
         campaigns: list[dict],
         activities: list[dict],
         experiments: list[dict],
+        templates: list[dict] | None = None,
     ) -> dict[str, int]:
-        added = {"leads": 0, "campaigns": 0, "activities": 0, "experiments": 0, "skipped_leads": 0}
+        added = {
+            "leads": 0,
+            "campaigns": 0,
+            "activities": 0,
+            "experiments": 0,
+            "skipped_leads": 0,
+            "templates": 0,
+        }
         with self.transaction():  # type: ignore[attr-defined]
             campaign_map: dict[int, int] = {}
             by_name = {item.name.lower(): item for item in self.list_campaigns()}  # type: ignore[attr-defined]
@@ -109,6 +117,30 @@ class WorkspaceMixin:
                 if mapped:
                     self.attach_campaigns(imported.id, mapped, commit=False)  # type: ignore[attr-defined]
                 added["experiments"] += 1
+            existing_templates = {item.name.lower() for item in self.list_templates()}  # type: ignore[attr-defined]
+            for template in templates or []:
+                name = str(template.get("name") or "").strip()
+                if not name:
+                    continue
+                title = name
+                suffix = 1
+                while title.lower() in existing_templates:
+                    suffix += 1
+                    title = (
+                        f"{name} (Imported)"
+                        if suffix == 2
+                        else f"{name} (Imported {suffix - 1})"
+                    )
+                self.create_template(  # type: ignore[attr-defined]
+                    name=title,
+                    body=str(template.get("body") or ""),
+                    business_type=str(template.get("business_type") or ""),
+                    presence_type=str(template.get("presence_type") or ""),
+                    language=str(template.get("language") or ""),
+                    commit=False,
+                )
+                existing_templates.add(title.lower())
+                added["templates"] += 1
         return added
 
     def _insert_imported_lead(self, row: dict, campaign_map: dict[int, int]) -> None:

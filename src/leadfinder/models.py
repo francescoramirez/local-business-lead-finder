@@ -141,6 +141,7 @@ class SearchReport:
     contactable: int
     output_paths: list[str] = field(default_factory=list)
     cancelled: bool = False
+    http_attempts: int = 0
 
 
 @dataclass
@@ -189,6 +190,8 @@ class Activity:
     note: str = ""
     contact_method: str = ""
     outcome: str = ""
+    metadata_json: str = ""
+    reverses_activity_id: int = 0
 
 
 @dataclass
@@ -202,6 +205,14 @@ class SearchRun:
     lead_count: int
     high_opportunity_count: int
     campaign_id: int = 0
+    request_count: int = 0
+    field_profile: str = ""
+    pages: int = 0
+    estimated_cost: str = ""
+    pricing_version: str = ""
+    currency: str = ""
+    cost_status: str = "unknown"
+    billing_sku: str = ""
 
 
 @dataclass

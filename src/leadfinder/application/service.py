@@ -38,6 +38,7 @@ from leadfinder.errors import (
     PlacesRateLimitError,
     PlacesServerError,
     RestoreError,
+    UndoError,
     WorkspaceError,
 )
 from leadfinder.exporters import export_leads
@@ -253,6 +254,16 @@ class LeadService:
     def dry_run(self, config: SearchConfig) -> SearchPlan:
         return build_plan(config)
 
+    def cost_preview(self, config: SearchConfig):
+        from leadfinder.costs.estimator import estimate_plan, page_scenarios
+
+        plan = self.dry_run(config)
+        return plan, estimate_plan(plan), page_scenarios(
+            query_count=plan.max_queries,
+            max_requests=config.max_requests,
+            field_profile=plan.field_profile,
+        )
+
     def require_api_key(self) -> str:
         return get_api_key()
 
@@ -284,6 +295,9 @@ class LeadService:
             country=config.country,
         )
         self.store.attach_leads(campaign.id, [item.lead.place_id for item in managed])
+        from leadfinder.costs.estimator import estimate_requests
+
+        estimate = estimate_requests(report.api_requests, config.field_profile)
         self.store.record_search(
             business_preset=config.business,
             location=location,
@@ -294,6 +308,16 @@ class LeadService:
                 1 for item in managed if item.lead.opportunity_level == "high"
             ),
             campaign_id=campaign.id,
+            request_count=report.api_requests,
+            field_profile=config.field_profile,
+            pages=config.pages,
+            estimated_cost=(
+                str(estimate.amount) if estimate.amount is not None else ""
+            ),
+            pricing_version=estimate.pricing_version,
+            currency=estimate.currency,
+            cost_status=estimate.status,
+            billing_sku=estimate.billing_sku,
         )
         return report, managed
 
@@ -335,12 +359,14 @@ class LeadService:
         *,
         language: str,
         model: str = "",
+        template_body: str = "",
     ) -> SalesPrepResult:
         return generate_sales_prep(
             item,
             language=language,
             model=model,
             provider=self.ai_provider,
+            template_body=template_body,
         )
 
     def save_sales_prep(self, item: ManagedLead, result: SalesPrepResult) -> ManagedLead:
@@ -374,6 +400,55 @@ class LeadService:
     def set_follow_up(self, item: ManagedLead, when: str) -> ManagedLead:
         state = self.store.set_follow_up(item.lead.place_id, when)
         return apply_state(item, state)
+
+    def undo_last(self, item: ManagedLead) -> ManagedLead:
+        from leadfinder.undo import latest_undoable
+
+        state = self.store.get(item.lead.place_id)
+        if state is None:
+            raise UndoError("Nothing to undo.")
+        history = self.store.list_activities(item.lead.place_id)
+        plan = latest_undoable(history, state)
+        if plan is None:
+            raise UndoError("Nothing to undo, or a later change made undo stale.")
+        undo_id = plan.activity.id
+        with self.store.transaction():
+            if plan.field == "contact_status":
+                state = self.store.set_contact_status(
+                    item.lead.place_id, plan.restore_value, undo_of=undo_id, commit=False
+                )
+            elif plan.field == "next_follow_up_at":
+                state = self.store.set_follow_up(
+                    item.lead.place_id, plan.restore_value, undo_of=undo_id, commit=False
+                )
+            else:
+                state = self.store.set_manual_priority(
+                    item.lead.place_id, plan.restore_value, undo_of=undo_id, commit=False
+                )
+        return apply_state(item, state)
+
+    def can_undo(self, place_id: str) -> bool:
+        from leadfinder.undo import latest_undoable
+
+        state = self.store.get(place_id)
+        if state is None:
+            return False
+        return latest_undoable(self.store.list_activities(place_id), state) is not None
+
+    def campaign_cost_text(self, campaign_id: int | None, report) -> str:
+        from leadfinder.costs.aggregation import format_campaign_costs, summarize_campaign_costs
+
+        runs = self.store.list_searches(limit=0)
+        return format_campaign_costs(
+            summarize_campaign_costs(
+                runs,
+                campaign_id=campaign_id or 0,
+                discovered_leads=report.historical.total_leads,
+                high_opportunity_leads=report.snapshot.high_opportunity,
+                interested_once=report.historical.interested_once,
+                won_once=report.historical.won_once,
+            )
+        )
 
     def schedule_in_days(self, item: ManagedLead, days: int) -> ManagedLead:
         return self.set_follow_up(item, shift_iso(days))
@@ -644,10 +719,52 @@ class LeadService:
 
         return export_workspace(self.store, destination, settings=settings)
 
-    def import_workspace(self, source: Path) -> dict[str, int]:
+    def import_workspace(self, source: Path) -> dict[str, object]:
         from leadfinder.workspace import import_workspace
 
         return import_workspace(self.store, source)
+
+    def list_templates(self):
+        return self.store.list_templates()
+
+    def create_template(
+        self,
+        *,
+        name: str,
+        body: str,
+        business_type: str = "",
+        presence_type: str = "",
+        language: str = "",
+    ):
+        return self.store.create_template(
+            name=name,
+            body=body,
+            business_type=business_type,
+            presence_type=presence_type,
+            language=language,
+        )
+
+    def update_template(
+        self,
+        template_id: int,
+        *,
+        name: str | None = None,
+        body: str | None = None,
+        business_type: str | None = None,
+        presence_type: str | None = None,
+        language: str | None = None,
+    ):
+        return self.store.update_template(
+            template_id,
+            name=name,
+            body=body,
+            business_type=business_type,
+            presence_type=presence_type,
+            language=language,
+        )
+
+    def delete_template(self, template_id: int) -> None:
+        self.store.delete_template(template_id)
 
     def doctor(self):
         from leadfinder.doctor import run_doctor

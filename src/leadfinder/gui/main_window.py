@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QStatusBar,
     QTableView,
@@ -24,11 +25,18 @@ from leadfinder.ai.provider import ai_configured, groq_model
 from leadfinder.analytics import compare_reports
 from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
-from leadfinder.duplicates import duplicate_hint
-from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError
+from leadfinder.duplicates import duplicate_hint_text
+from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError, UndoError
 from leadfinder.gui.analytics_page import AnalyticsPage, custom_bounds, export_report_dialog
+from leadfinder.gui.compare_dialog import MAX_COMPARE, CompareDialog, compare_rows
 from leadfinder.gui.dashboard_page import DashboardPage
-from leadfinder.gui.dialogs import ActivityDialog, CampaignDialog, ExperimentDialog, FollowUpDialog
+from leadfinder.gui.dialogs import (
+    ActivityDialog,
+    CampaignDialog,
+    ExperimentDialog,
+    FollowUpDialog,
+    TemplateDialog,
+)
 from leadfinder.gui.experiments_page import ExperimentsPage
 from leadfinder.gui.filter_bar import FilterBar
 from leadfinder.gui.formatters import format_when
@@ -44,7 +52,10 @@ from leadfinder.gui.pipeline_page import PipelinePage
 from leadfinder.gui.prospects_page import ProspectsPage
 from leadfinder.gui.saved_filters import (
     all_named_filters,
+    filters_for_workspace,
+    filters_from_workspace,
     load_custom_filters,
+    merge_imported_filters,
     store_custom_filters,
 )
 from leadfinder.gui.search_panel import SearchPanel
@@ -57,6 +68,7 @@ from leadfinder.models import (
     SearchProgress,
     SearchReport,
 )
+from leadfinder.templates import render_template, values_from_lead
 from leadfinder.workflow import ACTIVITY_TYPE_LABELS, ContactStatus
 
 
@@ -132,6 +144,7 @@ class MainWindow(QMainWindow):
         self.filter_tag = bar.filter_tag
         self.saved_filters = bar.saved_filters
         self.save_filter_btn = bar.save_filter_btn
+        self.compare_btn = bar.compare_btn
 
     def _bind_details(self, panel: LeadDetailsPanel) -> None:
         self.detail_name = panel.detail_name
@@ -147,6 +160,9 @@ class MainWindow(QMainWindow):
         self.mark_interested_btn = panel.mark_interested_btn
         self.schedule_btn = panel.schedule_btn
         self.activity_btn = panel.activity_btn
+        self.undo_btn = panel.undo_btn
+        self.copy_phone_btn = panel.copy_phone_btn
+        self.copy_pitch_btn = panel.copy_pitch_btn
         self.contact_status = panel.contact_status
         self.manual_priority = panel.manual_priority
         self.notes = panel.notes
@@ -154,6 +170,7 @@ class MainWindow(QMainWindow):
         self.follow_label = panel.follow_label
         self.detail_activity = panel.detail_activity
         self.sales_prep = panel.sales_prep
+        self.pitch = panel.sales_prep.pitch
         self.detail_tabs = panel.detail_tabs
 
     def _build_ui(self) -> None:
@@ -173,7 +190,7 @@ class MainWindow(QMainWindow):
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
@@ -232,6 +249,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready")
+        self.status_undo_btn = QPushButton("Undo")
+        self.status_undo_btn.setVisible(False)
+        self.statusBar().addPermanentWidget(self.status_undo_btn)
 
         find_action = QAction("Find", self)
         find_action.setShortcut(QKeySequence.StandardKey.Find)
@@ -287,6 +307,7 @@ class MainWindow(QMainWindow):
         self.filter_tag.textChanged.connect(self._apply_filters)
         self.saved_filters.currentIndexChanged.connect(self._apply_saved_filter)
         self.save_filter_btn.clicked.connect(self._save_current_filter)
+        self.compare_btn.clicked.connect(self.compare_selected)
         self.table.selectionModel().selectionChanged.connect(self._on_selection)
         self.table.customContextMenuRequested.connect(self._table_menu)
         self.contact_status.currentIndexChanged.connect(self._on_status_changed)
@@ -303,6 +324,15 @@ class MainWindow(QMainWindow):
         )
         self.schedule_btn.clicked.connect(self.schedule_follow_up)
         self.activity_btn.clicked.connect(self.add_activity)
+        self.undo_btn.clicked.connect(self.undo_last)
+        self.status_undo_btn.clicked.connect(self.undo_last)
+        self.copy_phone_btn.clicked.connect(self._copy_phone)
+        self.copy_pitch_btn.clicked.connect(self._copy_pitch)
+        self.pitch.selector.currentIndexChanged.connect(self._render_pitch)
+        self.pitch.copy_btn.clicked.connect(self._copy_pitch)
+        self.pitch.new_btn.clicked.connect(self._new_template)
+        self.pitch.edit_btn.clicked.connect(self._edit_template)
+        self.pitch.delete_btn.clicked.connect(self._delete_template)
         self.tabs.currentChanged.connect(self._refresh_secondary)
         self.pipeline_page.status_dropped.connect(self._on_pipeline_drop)
         self.pipeline_page.card_selected.connect(self._select_place)
@@ -374,23 +404,39 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Dry run", friendly_error(error))
             return
         self.summary.setPlainText(self._plan_text(plan))
+        self._update_cost_preview()
         self.statusBar().showMessage("Dry run complete. No API requests were made.")
 
     def _plan_text(self, plan: SearchPlan) -> str:
+        from leadfinder.costs.estimator import estimate_plan, page_scenarios
+        from leadfinder.costs.models import format_estimate
+
         locations = "\n".join(f"  - {item}" for item in plan.locations[:40])
         extra = "" if len(plan.locations) <= 40 else f"\n  … {len(plan.locations) - 40} more"
+        estimate = estimate_plan(plan)
+        scenario_lines = []
+        for pages, requests, cost in page_scenarios(
+            query_count=plan.max_queries,
+            max_requests=self.max_requests.value(),
+            field_profile=plan.field_profile,
+        ):
+            scenario_lines.append(
+                f"  {pages} page(s): {requests} requests · {format_estimate(cost)}"
+            )
         return (
-            f"Business preset: {plan.business}\n"
+            f"Business: {plan.business}\n"
+            f"Location: {', '.join(plan.locations[:8]) or '(none)'}\n"
+            f"Coverage: {plan.coverage}\n"
+            f"Estimated search requests: {plan.max_api_requests}\n"
+            f"Max pages: {plan.pages}\n"
+            f"Field profile: {plan.field_profile}\n"
+            f"{format_estimate(estimate)}\n"
+            f"Page comparison (no network):\n" + "\n".join(scenario_lines) + "\n\n"
             f"Search terms: {', '.join(plan.search_terms)}\n"
-            f"Locations: {len(plan.locations)}\n"
             f"Country: {plan.country}\n"
             f"Region: {plan.region or '(none)'}\n"
-            f"Coverage: {plan.coverage}\n"
             f"Max queries: {plan.max_queries}\n"
-            f"Max API requests: {plan.max_api_requests}\n"
             f"Page size: {plan.page_size}\n"
-            f"Pages: {plan.pages}\n"
-            f"Field profile: {plan.field_profile}\n"
             f"Billing tier: {plan.billing_tier}\n"
             f"Website analysis: {'yes' if plan.analyze_websites else 'no'}\n\n"
             f"Locations:\n{locations}{extra}\n\n"
@@ -480,10 +526,16 @@ class MainWindow(QMainWindow):
         self.model.set_leads(managed)
         self.proxy.sort(1, Qt.SortOrder.DescendingOrder)
         self._update_empty_state()
+        from leadfinder.costs.estimator import estimate_requests
+        from leadfinder.costs.models import format_estimate
+
+        estimate = estimate_requests(report.api_requests, self.fields.currentText())
         cancelled = " (cancelled)" if report.cancelled else ""
         self.summary.setPlainText(
+            f"This search\n"
+            f"Requests: {report.api_requests}\n"
+            f"{format_estimate(estimate)}\n\n"
             f"Queries: {report.queries_executed}\n"
-            f"API requests: {report.api_requests}\n"
             f"Places found: {report.places_found}\n"
             f"Duplicates discarded: {report.duplicates_discarded}\n"
             f"Operational: {report.operational}\n"
@@ -539,9 +591,10 @@ class MainWindow(QMainWindow):
 
     def _on_selection(self) -> None:
         indexes = self.table.selectionModel().selectedRows()
+        self.compare_btn.setEnabled(2 <= len(indexes) <= MAX_COMPARE)
         if not indexes:
             return
-        item = self.proxy.lead_from_proxy(indexes[0].row())
+        item = self.proxy.lead_from_proxy(indexes[-1].row())
         if item:
             self._show_lead(item)
 
@@ -594,9 +647,12 @@ class MainWindow(QMainWindow):
         if item.contact_status != "new":
             seen += f"  ·  {CONTACT_STATUS_LABELS.get(item.contact_status, item.contact_status)}"
         self.detail_seen.setText(seen)
-        hint = duplicate_hint(item, self.model.leads())
+        hint = duplicate_hint_text(item, self.model.leads(), self.service.store.list_all())
         self.detail_duplicate.setText(hint)
         self.detail_duplicate.setVisible(bool(hint))
+        self.copy_phone_btn.setEnabled(bool(lead.phone))
+        self._sync_undo(item)
+        self._render_pitch()
         self.follow_label.setText(format_when(item.next_follow_up_at))
         self.tags_edit.setText(item.tags)
         self.open_maps.setEnabled(bool(lead.google_maps_url))
@@ -623,6 +679,8 @@ class MainWindow(QMainWindow):
         self.model.update_row(updated)
         self._show_lead(updated)
         self._refresh_secondary()
+        label = CONTACT_STATUS_LABELS.get(status, status)
+        self._offer_undo(f"Status changed to {label}")
 
     def _on_priority_changed(self) -> None:
         if self._updating_details or self._selected is None:
@@ -632,6 +690,7 @@ class MainWindow(QMainWindow):
         self._selected = updated
         self.model.update_row(updated)
         self._show_lead(updated)
+        self._offer_undo("Priority updated")
 
     def _schedule_notes_save(self) -> None:
         if self._updating_details:
@@ -678,6 +737,7 @@ class MainWindow(QMainWindow):
         self.model.update_row(updated)
         self._show_lead(updated)
         self._refresh_secondary()
+        self._offer_undo("Follow-up updated")
 
     def add_activity(self) -> None:
         if self._selected is None:
@@ -715,6 +775,7 @@ class MainWindow(QMainWindow):
             self._selected,
             language=self.sales_prep.language_value(),
             model=self.sales_prep.model_value(),
+            template_body=self.pitch.current_template_body(),
             parent=self,
         )
         self._prep_worker.succeeded.connect(self._on_sales_prep_done)
@@ -834,7 +895,8 @@ class MainWindow(QMainWindow):
             for metric, a_val, b_val in compare_reports(left, right):
                 lines.append(f"{metric} | {a_val} | {b_val}")
             comparison = "\n".join(lines)
-        self.analytics_page.show_report(report, comparison)
+        cost_text = self.service.campaign_cost_text(campaign_id, report)
+        self.analytics_page.show_report(report, comparison, cost_text)
 
     def _insights_period(self):
         choice = int(self.insights_page.period.currentData() or 30)
@@ -963,15 +1025,22 @@ class MainWindow(QMainWindow):
         self._start_insights_worker(metrics, experiment=True)
 
     def _update_cost_preview(self) -> None:
+        from leadfinder.costs.models import format_estimate
+
         try:
-            plan = self.service.dry_run(self.current_config())
+            plan, estimate, scenarios = self.service.cost_preview(self.current_config())
         except LeadFinderError as error:
             self.cost_preview.setText(str(error))
             return
-        self.cost_preview.setText(
+        lines = [
             f"{plan.billing_tier}: up to {plan.max_api_requests} API requests "
-            f"({plan.max_queries} queries x {plan.pages} page(s)). Dry Run for the full plan."
-        )
+            f"({plan.max_queries} queries × {plan.pages} page(s)).",
+            format_estimate(estimate),
+            "Compare pages (no network):",
+        ]
+        for pages, requests, cost in scenarios:
+            lines.append(f"{pages} page(s) → {requests} requests · {format_estimate(cost)}")
+        self.cost_preview.setText("\n".join(lines))
 
     def export_analytics(self) -> None:
         period = self._analytics_period()
@@ -1002,12 +1071,13 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
         menu.addAction("Mark contacted", lambda: self._quick_status(ContactStatus.CONTACTED.value))
-        menu.addAction(
-            "Mark interested",
-            lambda: self._quick_status(ContactStatus.INTERESTED.value),
-        )
-        menu.addAction("Schedule follow-up", self.schedule_follow_up)
-        menu.addAction("Add activity", self.add_activity)
+        menu.addAction("Set follow-up", self.schedule_follow_up)
+        menu.addAction("Priority high", lambda: self._quick_priority("high"))
+        if self._selected.lead.phone:
+            menu.addAction("Copy phone", self._copy_phone)
+        if self._selected.lead.website:
+            menu.addAction("Open website", self._open_website)
+        menu.addAction("Copy pitch", self._copy_pitch)
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def export_pipeline(self) -> None:
@@ -1080,6 +1150,7 @@ class MainWindow(QMainWindow):
             "preset": self.preset.currentData(),
             "coverage": self.coverage.currentText(),
             "fields": self.fields.currentText(),
+            "saved_filters": filters_for_workspace(load_custom_filters(self.settings)),
         }
         try:
             written = self.service.export_workspace(Path(path), settings=settings)
@@ -1107,6 +1178,12 @@ class MainWindow(QMainWindow):
         except LeadFinderError as error:
             QMessageBox.warning(self, "Import", friendly_error(error))
             return
+        incoming = filters_from_workspace(added.pop("imported_saved_filters", {}))
+        if incoming:
+            merged = merge_imported_filters(load_custom_filters(self.settings), incoming)
+            store_custom_filters(self.settings, merged)
+            self._reload_saved_filter_names()
+        self._reload_templates()
         self._refresh_secondary()
         QMessageBox.information(
             self,
@@ -1116,7 +1193,8 @@ class MainWindow(QMainWindow):
             f"Leads skipped: {added.get('skipped_leads', 0)}\n"
             f"Campaigns: {added.get('campaigns', 0)}\n"
             f"Activities: {added.get('activities', 0)}\n"
-            f"Experiments: {added.get('experiments', 0)}",
+            f"Experiments: {added.get('experiments', 0)}\n"
+            f"Templates: {added.get('templates', 0)}",
         )
 
     def show_doctor(self) -> None:
@@ -1174,6 +1252,7 @@ class MainWindow(QMainWindow):
             except (TypeError, ValueError, RuntimeError):
                 pass
         self._reload_saved_filter_names()
+        self._reload_templates()
         self._refresh_ai_status()
         self._update_cost_preview()
 
@@ -1235,6 +1314,136 @@ class MainWindow(QMainWindow):
         index = self.saved_filters.findText(name.strip())
         if index >= 0:
             self.saved_filters.setCurrentIndex(index)
+
+    def _offer_undo(self, message: str) -> None:
+        can = bool(self._selected and self.service.can_undo(self._selected.lead.place_id))
+        self.undo_btn.setEnabled(can)
+        self.status_undo_btn.setVisible(can)
+        self.statusBar().showMessage(message)
+
+    def _sync_undo(self, item: ManagedLead) -> None:
+        can = self.service.can_undo(item.lead.place_id)
+        self.undo_btn.setEnabled(can)
+        self.status_undo_btn.setVisible(can)
+
+    def undo_last(self) -> None:
+        if self._selected is None:
+            return
+        try:
+            updated = self.service.undo_last(self._selected)
+        except UndoError as error:
+            QMessageBox.information(self, "Undo", str(error))
+            self._sync_undo(self._selected)
+            return
+        self._selected = updated
+        self.model.update_row(updated)
+        self._show_lead(updated)
+        self._refresh_secondary()
+        self.statusBar().showMessage("Change undone. Activity history was kept.")
+
+    def _copy_phone(self) -> None:
+        if self._selected and self._selected.lead.phone:
+            self.sales_prep.copy_text(self._selected.lead.phone)
+
+    def _copy_pitch(self) -> None:
+        text = self.pitch.preview.toPlainText().strip()
+        if text:
+            self.sales_prep.copy_text(text)
+
+    def _render_pitch(self) -> None:
+        if self._selected is None:
+            self.pitch.preview.setPlainText("")
+            return
+        body = self.pitch.current_template_body()
+        if not body:
+            self.pitch.preview.setPlainText("")
+            return
+        self.pitch.preview.setPlainText(
+            render_template(body, values_from_lead(self._selected))
+        )
+
+    def _reload_templates(self) -> None:
+        keep = self.pitch.selected_id()
+        self.pitch.reload(self.service.list_templates(), keep_id=keep)
+        self._render_pitch()
+
+    def _new_template(self) -> None:
+        dialog = TemplateDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        created = self.service.create_template(
+            name=dialog.name.text(),
+            body=dialog.body.toPlainText(),
+            business_type=dialog.business_type.text(),
+            presence_type=dialog.presence_type.text(),
+            language=dialog.language.text(),
+        )
+        self.pitch.reload(self.service.list_templates(), keep_id=created.id)
+        self._render_pitch()
+
+    def _edit_template(self) -> None:
+        template_id = self.pitch.selected_id()
+        if not template_id:
+            return
+        current = next(
+            (item for item in self.service.list_templates() if item.id == template_id),
+            None,
+        )
+        if current is None:
+            return
+        dialog = TemplateDialog(
+            self,
+            name=current.name,
+            body=current.body,
+            business_type=current.business_type,
+            presence_type=current.presence_type,
+            language=current.language,
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        self.service.update_template(
+            template_id,
+            name=dialog.name.text(),
+            body=dialog.body.toPlainText(),
+            business_type=dialog.business_type.text(),
+            presence_type=dialog.presence_type.text(),
+            language=dialog.language.text(),
+        )
+        self._reload_templates()
+
+    def _delete_template(self) -> None:
+        template_id = self.pitch.selected_id()
+        if not template_id:
+            return
+        self.service.delete_template(template_id)
+        self._reload_templates()
+
+    def _quick_priority(self, priority: str) -> None:
+        if self._selected is None:
+            return
+        index = self.manual_priority.findData(priority)
+        self.manual_priority.setCurrentIndex(max(index, 0))
+        self._on_priority_changed()
+
+    def compare_selected(self) -> None:
+        items: list[ManagedLead] = []
+        for index in self.table.selectionModel().selectedRows():
+            item = self.proxy.lead_from_proxy(index.row())
+            if item is not None:
+                items.append(item)
+        if not (2 <= len(items) <= MAX_COMPARE):
+            QMessageBox.information(
+                self,
+                "Compare selected",
+                "Select between 2 and 5 leads to compare.",
+            )
+            return
+        rows = compare_rows(
+            items,
+            session=self.model.leads(),
+            local=self.service.store.list_all(),
+        )
+        CompareDialog(items, rows, self).exec()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_notes()

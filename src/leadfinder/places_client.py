@@ -33,6 +33,7 @@ class TextSearchResult:
     places: list[dict[str, Any]]
     api_requests: int
     pages_fetched: int
+    http_attempts: int = 0
 
 
 def _parse_retry_after(value: str | None) -> float | None:
@@ -95,12 +96,14 @@ class PlacesClient:
         places: list[dict[str, Any]] = []
         api_requests = 0
         pages_fetched = 0
+        http_attempts = 0
         budget = remaining_requests if remaining_requests is not None else max_pages
 
         for page_number in range(max_pages):
             if api_requests >= budget:
                 break
-            data = self._post(payload, field_mask)
+            data, attempts = self._post(payload, field_mask)
+            http_attempts += attempts
             api_requests += 1
             pages_fetched += 1
             places.extend(data.get("places") or [])
@@ -118,9 +121,10 @@ class PlacesClient:
             places=places,
             api_requests=api_requests,
             pages_fetched=pages_fetched,
+            http_attempts=http_attempts,
         )
 
-    def _post(self, payload: dict[str, Any], field_mask: str) -> dict[str, Any]:
+    def _post(self, payload: dict[str, Any], field_mask: str) -> tuple[dict[str, Any], int]:
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             SEARCH_URL,
@@ -133,11 +137,13 @@ class PlacesClient:
             },
         )
         last_error: Exception | None = None
+        attempts = 0
         for attempt in range(self.max_retries + 1):
+            attempts = attempt + 1
             try:
                 with self._opener(request, timeout=self.timeout) as response:
                     raw = response.read().decode("utf-8")
-                return json.loads(raw)
+                return json.loads(raw), attempts
             except urllib.error.HTTPError as error:
                 detail = error.read().decode("utf-8", errors="replace")
                 last_error = self._map_http_error(error.code, detail)
