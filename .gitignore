@@ -18,6 +18,9 @@ dist/
 build/
 *.egg
 
+# Packaging outputs (track spec/scripts, not generated VERSIONINFO)
+packaging/file_version_info.txt
+
 # Test / lint caches
 .pytest_cache/
 .mypy_cache/

@@ -16,8 +16,19 @@ class DashboardPage(QWidget):
         self.conversions = QLabel("")
         self.recent = QPlainTextEdit()
         self.recent.setReadOnly(True)
+        self.demo_guide = QLabel(
+            "Demo checklist\n"
+            "1. Select a lead\n"
+            "2. Set priority High\n"
+            "3. Mark Contacted\n"
+            "4. Add follow-up\n"
+            "5. Open Analytics"
+        )
+        self.demo_guide.setWordWrap(True)
+        self.demo_guide.setVisible(False)
         layout = QVBoxLayout(self)
         layout.addWidget(self.overdue_banner)
+        layout.addWidget(self.demo_guide)
         box = QGroupBox("Pipeline")
         box_layout = QVBoxLayout(box)
         box_layout.addWidget(self.metrics)
@@ -84,3 +95,6 @@ class DashboardPage(QWidget):
                 f"{run.lead_count} leads"
             )
         self.recent.setPlainText("\n".join(lines))
+
+    def set_demo_guide(self, visible: bool) -> None:
+        self.demo_guide.setVisible(visible)

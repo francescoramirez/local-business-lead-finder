@@ -1,6 +1,8 @@
 # Security
 
-LeadFinder stores data on the local machine and reads API keys from the environment or a local `.env` file. Keys must never be committed, logged, or stored in SQLite / QSettings.
+LeadFinder stores data on the local machine. API keys are read from the environment, an optional developer `.env` in the working directory (never from the packaged install folder), or the OS credential store when `keyring` is available. Keys must never be committed, logged, or stored in SQLite / QSettings / workspace ZIP / JSON config.
+
+## Reporting
 
 ## Reporting
 
@@ -15,3 +17,5 @@ There is no separate security email published for this project.
 - Tests must mock network.
 - Google Places payloads and website HTML are not persisted.
 - Optional Groq calls send minimized fields only, after an explicit user action.
+- Packaged Windows builds are unsigned. SmartScreen may warn. Do not disable antivirus. Heuristic scans of `dist/` are not a security proof.
+

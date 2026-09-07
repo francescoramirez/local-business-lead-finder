@@ -79,6 +79,10 @@ class GuiDependencyError(LeadFinderError):
     pass
 
 
+class CredentialStoreError(LeadFinderError):
+    pass
+
+
 class AINotConfiguredError(LeadFinderError):
     pass
 

@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+
+os.environ.pop("LEADFINDER_DB_PATH", None)
+os.environ.pop("LEADFINDER_DATA_DIR", None)
+os.environ.pop("LEADFINDER_SMOKE_EXIT", None)
+os.environ.pop("LEADFINDER_PACKAGED_TEST", None)
+os.environ.pop("LEADFINDER_KEYRING_ACCOUNT_PLACES", None)
+os.environ.pop("LEADFINDER_TEST_PLACES_API_KEY", None)
+os.environ.pop("LEADFINDER_TEST_GROQ_API_KEY", None)
 
 
 def synthetic_place(

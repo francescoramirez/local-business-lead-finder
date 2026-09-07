@@ -19,9 +19,45 @@ jobs:
       - name: Tests
         run: pytest
         env:
-          # CI never talks to Google. Do not add API key secrets here.
           GOOGLE_MAPS_API_KEY: ""
           GROQ_API_KEY: ""
           QT_QPA_PLATFORM: offscreen
       - name: Type check
         run: mypy src/leadfinder
+
+  windows-package:
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package, GUI, and build tools
+        run: python -m pip install -e ".[dev,gui,build]"
+      - name: Placeholder icon
+        run: python packaging/make_placeholder_icon.py
+      - name: VERSIONINFO
+        run: python packaging/write_version_info.py --output packaging/file_version_info.txt
+      - name: PyInstaller
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build packaging/leadfinder.spec
+      - name: Copy licenses
+        shell: pwsh
+        run: |
+          Copy-Item LICENSE dist\LeadFinder\LICENSE
+          Copy-Item README.md dist\LeadFinder\README.md
+      - name: Artifact scan
+        run: python packaging/scan_artifact.py --root dist\LeadFinder
+      - name: Packaged GUI smoke
+        shell: pwsh
+        env:
+          LEADFINDER_SMOKE_EXIT: "1"
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          & dist\LeadFinder\LeadFinder.exe
+          if ($LASTEXITCODE -ne 0) { throw "Packaged smoke failed: $LASTEXITCODE" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: leadfinder-windows-x64
+          path: dist/LeadFinder
+          if-no-files-found: error

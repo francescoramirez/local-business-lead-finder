@@ -4,9 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import load_dotenv
-
-from leadfinder.errors import ConfigError, MissingApiKeyError
+from leadfinder.errors import ConfigError
 from leadfinder.fields import (
     DEFAULT_FIELD_PROFILE,
     FieldProfile,
@@ -27,6 +25,7 @@ from leadfinder.presets import get_preset
 API_KEY_ENV_VARS = ("GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_API_KEY")
 GROQ_KEY_ENV = "GROQ_API_KEY"
 GROQ_MODEL_ENV = "GROQ_MODEL"
+# Kept for callers that still import these names. Resolution lives in desktop.credentials.
 MAX_PAGES = 3
 MAX_PAGE_SIZE = 20
 DEFAULT_OUTPUT_DIR = Path("output")
@@ -150,30 +149,28 @@ class SearchConfig:
 
 
 def load_env_file() -> None:
-    load_dotenv(dotenv_path=Path(".env"), override=False)
+    from leadfinder.desktop.credentials import load_env_file as load_desktop_env
+
+    load_desktop_env()
 
 
 def places_key_configured() -> bool:
     """True when a Places key is present. Does not return or log the value."""
-    load_env_file()
-    return any(os.getenv(name, "").strip() for name in API_KEY_ENV_VARS)
+    from leadfinder.desktop.credentials import places_key_configured as configured
+
+    return configured()
 
 
 def get_api_key() -> str:
-    load_env_file()
-    for name in API_KEY_ENV_VARS:
-        value = os.getenv(name, "").strip()
-        if value:
-            return value
-    raise MissingApiKeyError(
-        "Missing Places API key. Set GOOGLE_MAPS_API_KEY or GOOGLE_PLACES_API_KEY "
-        "in the environment or a local .env file. See .env.example."
-    )
+    from leadfinder.desktop.credentials import get_places_api_key
+
+    return get_places_api_key()
 
 
 def groq_api_key() -> str:
-    load_env_file()
-    return os.getenv(GROQ_KEY_ENV, "").strip()
+    from leadfinder.desktop.credentials import get_groq_api_key
+
+    return get_groq_api_key()
 
 
 def groq_model_from_env() -> str:

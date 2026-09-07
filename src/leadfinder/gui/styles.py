@@ -66,5 +66,13 @@ QProgressBar::chunk { background: #0f766e; border-radius: 5px; }
 QLabel#hint { color: #6b7280; }
 QLabel#title { font-size: 18px; font-weight: 700; }
 QLabel#empty { color: #6b7280; font-size: 14px; }
+QLabel#demoBanner {
+    background: #fde68a;
+    color: #111827;
+    font-weight: 700;
+    padding: 8px 10px;
+    border: 1px solid #b45309;
+    border-radius: 6px;
+}
 QStatusBar { background: #eef1f4; }
 """

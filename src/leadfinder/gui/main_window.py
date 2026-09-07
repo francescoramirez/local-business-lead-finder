@@ -73,12 +73,16 @@ from leadfinder.workflow import ACTIVITY_TYPE_LABELS, ContactStatus
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, service: LeadService | None = None) -> None:
+    def __init__(
+        self,
+        service: LeadService | None = None,
+        settings: QSettings | None = None,
+    ) -> None:
         super().__init__()
         self.setWindowTitle("LeadFinder")
         self.resize(1280, 720)
         self.service = service or LeadService()
-        self.settings = QSettings("LeadFinder", "LeadFinder")
+        self.settings = settings or QSettings("LeadFinder", "LeadFinder")
         self._worker: SearchWorker | AnalyzeWorker | None = None
         self._prep_worker: SalesPrepWorker | None = None
         self._insights_worker: InsightsWorker | None = None
@@ -101,6 +105,7 @@ class MainWindow(QMainWindow):
         self._apply_filters()
         self._update_empty_state()
         self._refresh_secondary()
+        self._sync_workspace_chrome()
 
     def _bind_search_panel(self, panel: SearchPanel) -> None:
         self.preset = panel.preset
@@ -178,6 +183,12 @@ class MainWindow(QMainWindow):
         header.setObjectName("title")
         subtitle = QLabel("Discover → Qualify → Track → Analyze → Improve")
         subtitle.setObjectName("hint")
+        self.demo_banner = QLabel(
+            "DEMO MODE — synthetic data only. These are not real businesses."
+        )
+        self.demo_banner.setObjectName("demoBanner")
+        self.demo_banner.setWordWrap(True)
+        self.demo_banner.setVisible(False)
 
         self.search_panel = SearchPanel()
         self._bind_search_panel(self.search_panel)
@@ -245,10 +256,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(root)
         layout.addWidget(header)
         layout.addWidget(subtitle)
+        layout.addWidget(self.demo_banner)
         layout.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready")
+        self.workspace_label = QLabel("My Workspace")
+        self.statusBar().addPermanentWidget(self.workspace_label)
         self.status_undo_btn = QPushButton("Undo")
         self.status_undo_btn.setVisible(False)
         self.statusBar().addPermanentWidget(self.status_undo_btn)
@@ -276,14 +290,50 @@ class MainWindow(QMainWindow):
         import_ws_action.triggered.connect(self.import_workspace)
         doctor_action = QAction("Doctor", self)
         doctor_action.triggered.connect(self.show_doctor)
+        settings_action = QAction("Settings", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self.open_settings)
+        self.addAction(settings_action)
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        data_folder_action = QAction("Open data folder", self)
+        data_folder_action.triggered.connect(self.open_data_folder)
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(export_action)
         file_menu.addAction(backup_action)
         file_menu.addAction(restore_action)
         file_menu.addAction(export_ws_action)
         file_menu.addAction(import_ws_action)
+        file_menu.addAction(data_folder_action)
         file_menu.addSeparator()
         file_menu.addAction(doctor_action)
+        file_menu.addAction(settings_action)
+        file_menu.addSeparator()
+        file_menu.addAction(exit_action)
+
+        demo_menu = self.menuBar().addMenu("Demo")
+        enter_demo = QAction("Try Demo Mode", self)
+        enter_demo.triggered.connect(self.enter_demo_mode)
+        reset_demo = QAction("Reset Demo Data", self)
+        reset_demo.triggered.connect(self.reset_demo_data)
+        exit_demo = QAction("Return to My Workspace", self)
+        exit_demo.triggered.connect(self.exit_demo_mode)
+        demo_menu.addAction(enter_demo)
+        demo_menu.addAction(reset_demo)
+        demo_menu.addAction(exit_demo)
+
+        help_menu = self.menuBar().addMenu("Help")
+        welcome_action = QAction("Show Welcome", self)
+        welcome_action.setShortcut(QKeySequence("F1"))
+        welcome_action.triggered.connect(self.show_welcome)
+        about_action = QAction("About LeadFinder", self)
+        about_action.triggered.connect(self.open_about)
+        diagnostics_action = QAction("Copy diagnostics", self)
+        diagnostics_action.triggered.connect(self.copy_diagnostics)
+        help_menu.addAction(welcome_action)
+        help_menu.addAction(diagnostics_action)
+        help_menu.addAction(about_action)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _connect(self) -> None:
@@ -445,6 +495,20 @@ class MainWindow(QMainWindow):
 
     def start_search(self) -> None:
         if self._worker and self._worker.isRunning():
+            return
+        if self._is_demo_workspace():
+            switch = QMessageBox.question(
+                self,
+                "Demo Mode",
+                "Google Places search runs against My Workspace, not Demo Mode.\n\n"
+                "Switch to My Workspace now? Demo data will stay on disk.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if switch != QMessageBox.StandardButton.Yes:
+                return
+            self.exit_demo_mode()
+            return
+        if not self._confirm_places_cost_notice():
             return
         try:
             self.current_config().to_plan()
@@ -1100,9 +1164,9 @@ class MainWindow(QMainWindow):
         )
 
     def backup_db(self) -> None:
-        from leadfinder.paths import backup_filename
+        from leadfinder.paths import backup_filename, backups_dir
 
-        suggested = str(Path.home() / backup_filename())
+        suggested = str(backups_dir() / backup_filename(demo=self._is_demo_workspace()))
         path, _ = QFileDialog.getSaveFileName(self, "Backup data", suggested, "*.db")
         if not path:
             return
@@ -1114,6 +1178,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Backup", f"Saved local database to:\n{written}")
 
     def restore_db(self) -> None:
+        if self._is_demo_workspace():
+            QMessageBox.information(
+                self,
+                "Restore data",
+                "Restore is disabled in Demo Mode so a backup cannot overwrite "
+                "this synthetic workspace by accident. Return to My Workspace first.",
+            )
+            return
         path, _ = QFileDialog.getOpenFileName(self, "Restore data", str(Path.home()), "*.db")
         if not path:
             return
@@ -1137,7 +1209,12 @@ class MainWindow(QMainWindow):
         self._refresh_secondary()
 
     def export_workspace(self) -> None:
-        suggested = str(Path.home() / "leadfinder-workspace.zip")
+        name = (
+            "leadfinder-demo-workspace.zip"
+            if self._is_demo_workspace()
+            else "leadfinder-workspace.zip"
+        )
+        suggested = str(Path.home() / name)
         path, _ = QFileDialog.getSaveFileName(
             self, "Export local workspace", suggested, "*.zip"
         )
@@ -1160,6 +1237,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Export", f"Workspace saved to:\n{written}")
 
     def import_workspace(self) -> None:
+        if self._is_demo_workspace():
+            QMessageBox.information(
+                self,
+                "Import workspace",
+                "Import is disabled in Demo Mode so a real workspace cannot merge "
+                "into synthetic demo data. Return to My Workspace first.",
+            )
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Import workspace", str(Path.home()), "*.zip"
         )
@@ -1215,7 +1300,7 @@ class MainWindow(QMainWindow):
         if not leads:
             QMessageBox.information(self, "Export", "There are no leads to export.")
             return
-        suggested = str(Path.home() / f"leads.{fmt}")
+        suggested = str(self._export_dir() / f"leads.{fmt}")
         path, _ = QFileDialog.getSaveFileName(self, "Export leads", suggested, f"*.{fmt}")
         if not path:
             return
@@ -1236,7 +1321,13 @@ class MainWindow(QMainWindow):
         if index >= 0:
             self.preset.setCurrentIndex(index)
         self.coverage.setCurrentText(str(self.settings.value("coverage", "budget")))
-        self.fields.setCurrentText(str(self.settings.value("fields", "enterprise")))
+        stored_fields = str(self.settings.value("fields", "enterprise"))
+        if self.fields.findText(stored_fields) >= 0:
+            self.fields.setCurrentText(stored_fields)
+        from leadfinder.desktop.settings_keys import DEFAULT_MAX_REQUESTS, DEFAULT_PAGES
+
+        self.pages.setValue(self._int_setting(DEFAULT_PAGES, 1, 1, 3))
+        self.max_requests.setValue(self._int_setting(DEFAULT_MAX_REQUESTS, 100, 1, 500))
         geometry = self.settings.value("geometry")
         if geometry:
             self.restoreGeometry(geometry)
@@ -1445,6 +1536,166 @@ class MainWindow(QMainWindow):
         )
         CompareDialog(items, rows, self).exec()
 
+    def _is_demo_workspace(self) -> bool:
+        from leadfinder.paths import is_demo_database
+
+        return is_demo_database(self.service.store.path)
+
+    def _sync_workspace_chrome(self) -> None:
+        demo = self._is_demo_workspace()
+        self.demo_banner.setVisible(demo)
+        self.workspace_label.setText("Demo Workspace" if demo else "My Workspace")
+        title = "LeadFinder — DEMO MODE" if demo else "LeadFinder"
+        self.setWindowTitle(title)
+        self.dashboard_page.set_demo_guide(demo)
+
+    def _export_dir(self) -> Path:
+        from leadfinder.desktop.settings_keys import DEFAULT_EXPORT_DIR
+        from leadfinder.paths import exports_dir
+
+        raw = str(self.settings.value(DEFAULT_EXPORT_DIR, "") or "").strip()
+        if raw:
+            path = Path(raw)
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        return exports_dir()
+
+    def _confirm_places_cost_notice(self) -> bool:
+        from leadfinder.desktop.settings_keys import PLACES_COST_NOTICE
+
+        if self.settings.value(PLACES_COST_NOTICE, False, type=bool):
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("Google Places cost")
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setText("Google Places searches may incur charges.")
+        box.setInformativeText(
+            "LeadFinder shows estimated list-price cost before searching. "
+            "It does not read your Google Cloud invoice."
+        )
+        box.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        box.button(QMessageBox.StandardButton.Ok).setText("Continue")
+        if box.exec() != QMessageBox.StandardButton.Ok:
+            return False
+        self.settings.setValue(PLACES_COST_NOTICE, True)
+        return True
+
+    def _replace_service(self, store_path: Path) -> None:
+        from leadfinder.storage.local_leads import LocalLeadStore
+
+        old = self.service.store
+        self.service = LeadService(LocalLeadStore(store_path))
+        try:
+            old.close()
+        except Exception:
+            pass
+        self._prep_cache.clear()
+        self._selected = None
+        self.model.set_leads([])
+        self._update_empty_state()
+        self._refresh_secondary()
+        self._reload_templates()
+        self._sync_workspace_chrome()
+
+    def enter_demo_mode(self) -> None:
+        from leadfinder.demo import ensure_demo_database
+
+        if self._is_demo_workspace():
+            self.statusBar().showMessage("Already in Demo Mode.")
+            return
+        path = ensure_demo_database()
+        self._replace_service(path)
+        self.statusBar().showMessage("Demo Mode — synthetic data only.")
+
+    def exit_demo_mode(self) -> None:
+        from leadfinder.paths import data_dir
+
+        if not self._is_demo_workspace():
+            self.statusBar().showMessage("Already in My Workspace.")
+            return
+        self._replace_service(data_dir() / "leadfinder.db")
+        self.statusBar().showMessage("Returned to My Workspace.")
+
+    def reset_demo_data(self) -> None:
+        from leadfinder.demo import ensure_demo_database
+        from leadfinder.paths import demo_db_path
+
+        if not self._is_demo_workspace():
+            QMessageBox.information(
+                self,
+                "Reset Demo Data",
+                "Switch to Demo Mode first. Reset never touches My Workspace.",
+            )
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Reset Demo Data",
+            "Replace the demo database with a fresh synthetic set?\n\n"
+            "My Workspace will not be changed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.service.store.close()
+        except Exception:
+            pass
+        ensure_demo_database(reset=True)
+        self._replace_service(demo_db_path())
+        self.statusBar().showMessage("Demo data was reset.")
+
+    def open_settings(self) -> None:
+        from leadfinder.gui.settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self.settings, self)
+        if dialog.exec() == dialog.DialogCode.Accepted:
+            self._restore_settings()
+            self._refresh_ai_status()
+
+    def open_about(self) -> None:
+        from leadfinder.gui.about_dialog import AboutDialog
+
+        AboutDialog(self).exec()
+
+    def open_data_folder(self) -> None:
+        from leadfinder.paths import data_dir
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(data_dir())))
+
+    def copy_diagnostics(self) -> None:
+        from PySide6.QtGui import QGuiApplication
+
+        from leadfinder.desktop.diagnostics import collect_diagnostics
+
+        text = collect_diagnostics(db_path=self.service.store.path)
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(text)
+        self.statusBar().showMessage("Diagnostics copied. Keys and lead data are not included.")
+
+    def show_welcome(self) -> None:
+        from leadfinder.gui.onboarding import run_onboarding
+
+        dialog = run_onboarding(self, self.settings)
+        if dialog.result() != dialog.DialogCode.Accepted:
+            return
+        if dialog.choice == "demo":
+            self.enter_demo_mode()
+        elif dialog.choice == "import" and dialog.import_path is not None:
+            if self._is_demo_workspace():
+                self.exit_demo_mode()
+            try:
+                added = self.service.import_workspace(dialog.import_path)
+            except LeadFinderError as error:
+                QMessageBox.warning(self, "Import workspace", friendly_error(error))
+                return
+            self._refresh_secondary()
+            QMessageBox.information(
+                self,
+                "Import workspace",
+                f"Merged workspace. Leads: {added.get('leads', 0)}",
+            )
+
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_notes()
         self.settings.setValue("location", self.location.text())
@@ -1453,6 +1704,10 @@ class MainWindow(QMainWindow):
         self.settings.setValue("preset", self.preset.currentData())
         self.settings.setValue("coverage", self.coverage.currentText())
         self.settings.setValue("fields", self.fields.currentText())
+        from leadfinder.desktop.settings_keys import DEFAULT_MAX_REQUESTS, DEFAULT_PAGES
+
+        self.settings.setValue(DEFAULT_PAGES, self.pages.value())
+        self.settings.setValue(DEFAULT_MAX_REQUESTS, self.max_requests.value())
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("ai_output_language", self.sales_prep.language_value())
         self.settings.setValue("ai_model", self.sales_prep.model_value())
@@ -1463,3 +1718,11 @@ class MainWindow(QMainWindow):
             self._worker.request_cancel()
             self._worker.wait(2000)
         event.accept()
+
+    def _int_setting(self, key: str, default: int, lo: int, hi: int) -> int:
+        raw = self.settings.value(key, default)
+        try:
+            value = int(str(raw))
+        except (TypeError, ValueError):
+            value = default
+        return max(lo, min(hi, value))

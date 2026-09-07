@@ -1,11 +1,11 @@
-"""Synthetic demo workspace. Never writes the default user database unless asked."""
+"""Synthetic demo workspace. Never writes the default user database."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from leadfinder.errors import ConfigError
-from leadfinder.paths import default_db_path
+from leadfinder.paths import default_db_path, demo_db_path, is_user_database
 from leadfinder.storage.local_leads import LocalLeadStore
 from leadfinder.workflow import to_iso, utc_now
 
@@ -30,25 +30,44 @@ DEMO_NAMES = (
     "River Cinder Bakery",
     "Sandpiper Vault Gym",
     "Timber Quill Hotel",
+    "Umber Sparrow Law",
+    "Velvet Anchor Salon",
+    "Willow Circuit Repair",
+    "Yarrow Point Dentist",
+    "Zinc Harbor Fitness",
 )
 
+PRESETS = (
+    "cafe",
+    "restaurant",
+    "hotel",
+    "gym",
+    "beauty_salon",
+    "dentist",
+    "electrician",
+    "plumber",
+    "car_repair",
+    "bar",
+)
+CITIES = ("Example Bay", "Harbor Town", "North Dunes", "Cedar Inlet")
 PRESENCE = ("no_website", "social_only", "has_website", "link_aggregator", "unreachable")
 STATUSES = ("new", "contacted", "interested", "follow_up", "won", "rejected")
 PRIORITIES = ("high", "normal", "low", "ignore")
-PRESETS = ("cafe", "hotel", "restaurant", "gym", "bakery")
-CITIES = ("Example Bay", "Harbor Town", "North Dunes")
 
 
-def seed_demo_database(path: Path, *, count: int = 72) -> Path:
+def seed_demo_database(path: Path, *, count: int = 80) -> Path:
     destination = path.expanduser().resolve()
     default = default_db_path().expanduser().resolve()
-    if destination == default:
+    if destination == default or is_user_database(destination):
         raise ConfigError(
             "Refusing to seed the default LeadFinder database. Pass an explicit --db path."
         )
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         destination.unlink()
+    for extra in (Path(str(destination) + "-wal"), Path(str(destination) + "-shm")):
+        if extra.exists():
+            extra.unlink()
     store = LocalLeadStore(destination)
     now = utc_now()
     stamp = to_iso(now)
@@ -64,9 +83,14 @@ def seed_demo_database(path: Path, *, count: int = 72) -> Path:
             business_preset="hotel",
             location="Harbor Town",
         ),
+        store.create_campaign(
+            name="Demo local services",
+            business_preset="electrician",
+            location="Cedar Inlet",
+        ),
     ]
     place_ids: list[str] = []
-    total = max(50, min(count, 100))
+    total = max(60, min(count, 100))
     for index in range(total):
         name = DEMO_NAMES[index % len(DEMO_NAMES)]
         suffix = index // len(DEMO_NAMES) + 1
@@ -87,7 +111,7 @@ def seed_demo_database(path: Path, *, count: int = 72) -> Path:
             region="Demo Province",
             country="AR",
             website_status=presence,
-            campaign_id=campaigns[index % 2].id,
+            campaign_id=campaigns[index % len(campaigns)].id,
         )
         store.set_manual_priority(place_id, PRIORITIES[index % len(PRIORITIES)])
         if status != "new":
@@ -97,14 +121,16 @@ def seed_demo_database(path: Path, *, count: int = 72) -> Path:
         if index % 7 == 0:
             store.add_activity(place_id, "note", note="Demo follow-up note")
         place_ids.append(place_id)
-    store.attach_leads(campaigns[0].id, place_ids[: total // 2])
-    store.attach_leads(campaigns[1].id, place_ids[total // 2 :])
+    third = max(1, total // 3)
+    store.attach_leads(campaigns[0].id, place_ids[:third])
+    store.attach_leads(campaigns[1].id, place_ids[third : 2 * third])
+    store.attach_leads(campaigns[2].id, place_ids[2 * third :])
     store.record_search(
         business_preset="cafe",
         location="Example Bay",
         region="Demo Province",
         country="AR",
-        lead_count=total // 2,
+        lead_count=third,
         high_opportunity_count=12,
         campaign_id=campaigns[0].id,
         request_count=18,
@@ -121,7 +147,7 @@ def seed_demo_database(path: Path, *, count: int = 72) -> Path:
         location="Harbor Town",
         region="Demo Province",
         country="AR",
-        lead_count=total - total // 2,
+        lead_count=third,
         high_opportunity_count=4,
         campaign_id=campaigns[1].id,
         cost_status="unknown",
@@ -154,3 +180,10 @@ def seed_demo_database(path: Path, *, count: int = 72) -> Path:
     )
     store.close()
     return destination
+
+
+def ensure_demo_database(*, reset: bool = False) -> Path:
+    path = demo_db_path()
+    if reset or not path.exists():
+        return seed_demo_database(path)
+    return path

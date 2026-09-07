@@ -25,6 +25,7 @@ def test_help_lists_main_commands() -> None:
     assert "templates" in result.stdout
     assert "costs" in result.stdout
     assert "demo-data" in result.stdout
+    assert "diagnostics" in result.stdout
 
 
 def test_presets_lists_business_types() -> None:

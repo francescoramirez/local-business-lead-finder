@@ -711,6 +711,14 @@ def demo_data_command(
     console.print(f"Demo database written to {written}")
 
 
+@app.command("diagnostics")
+def diagnostics_command() -> None:
+    """Print support diagnostics. Never includes API keys or lead records."""
+    from leadfinder.desktop.diagnostics import collect_diagnostics
+
+    console.print(collect_diagnostics(), highlight=False)
+
+
 @app.command("doctor")
 def doctor_command() -> None:
     """Check local database, schema, and configuration. Never prints keys."""

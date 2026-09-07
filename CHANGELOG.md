@@ -2,6 +2,26 @@
 
 All notable LeadFinder versions. Dates are omitted when they cannot be derived from the repository.
 
+## 1.3.0
+
+### Added
+
+- Windows x64 desktop packaging: PyInstaller one-folder app, optional Inno Setup per-user installer, standalone ZIP, release manifest and SHA-256 sums.
+- First-run onboarding (Welcome → How it works → Google Places → Demo) stored in QSettings, with Help → Show Welcome.
+- Isolated Demo Mode (`leadfinder-demo.db`) with reset and return to My Workspace. Synthetic data only; no Google/Groq.
+- Settings, About, copy-diagnostics, Open data folder, and a Places list-price notice before the first real search.
+- Optional OS credential storage (`keyring`) for Places and Groq keys, with environment variables still taking precedence.
+- Official Windows packager is Python 3.12 x64 (source remains 3.10+). Isolated venv, `%TEMP%` PyInstaller staging, packaged QA hooks, `tzdata` for IANA zones, and `docs/CLEAN_WINDOWS_TEST.md`.
+
+### Changed
+
+- Startup uses a frozen-resource helper, user-data paths stay in `platformdirs`, and GUI errors avoid raw tracebacks.
+- README, architecture, security, and new desktop/release docs describe packaging, unsigned-build SmartScreen, and list-price cost semantics.
+
+### Fixed
+
+- Developer `.env` is no longer loaded from the packaged install directory, so keys are not expected next to `LeadFinder.exe`.
+
 ## 1.2.0
 
 ### Added

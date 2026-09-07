@@ -8,6 +8,8 @@ LeadFinder is a local-first, single-user tool. Keep it explainable. Do not add c
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1   # Linux/macOS: source .venv/bin/activate
 python -m pip install -e ".[dev,gui]"
+# Windows packaging extras when building installers:
+# python -m pip install -e ".[dev,gui,build]"
 ```
 
 ## Checks

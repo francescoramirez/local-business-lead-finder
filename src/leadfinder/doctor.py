@@ -8,6 +8,7 @@ from pathlib import Path
 
 from leadfinder.config import groq_api_key, places_key_configured
 from leadfinder.costs.pricing import default_catalog
+from leadfinder.desktop.runtime import is_frozen
 from leadfinder.paths import default_db_path
 from leadfinder.storage.schema import CURRENT_SCHEMA_VERSION, schema_version
 
@@ -132,6 +133,13 @@ def run_doctor(path: Path | None = None) -> DoctorReport:
     )
     gui_status, gui_detail = _gui_available()
     checks.append(DoctorCheck("GUI", gui_status, gui_detail))
+    checks.append(
+        DoctorCheck(
+            "Runtime",
+            "OK",
+            "packaged Windows build" if is_frozen() else "Python source",
+        )
+    )
     checks.append(DoctorCheck("Local data path", "OK", str(db_path)))
     catalog = default_catalog()
     checks.append(

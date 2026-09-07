@@ -1,6 +1,6 @@
 # Architecture
 
-LeadFinder 1.2 is a local-first Python package (`leadfinder`) with a Typer CLI and an optional PySide6 GUI. Both use the same application service. This is not a strict clean-architecture rewrite: GUI still coordinates workers and pages; storage is a facade over domain mixins.
+LeadFinder 1.3 is a local-first Python package (`leadfinder`) with a Typer CLI and a PySide6 GUI. Windows x64 can be packaged as a one-folder app (PyInstaller) plus an optional per-user installer. Both CLI and GUI use the same application service. This is not a strict clean-architecture rewrite: GUI still coordinates workers and pages; storage is a facade over domain mixins.
 
 ```text
 CLI / GUI
@@ -72,6 +72,7 @@ Direction of dependencies: GUI/CLI → Application → Domain → Storage / adap
 - `lead_details.py` — overview, workflow, undo, sales prep tab
 - `pitch_panel.py` — template picker inside Sales Prep
 - `compare_dialog.py` — 2–5 lead comparison table
+- `onboarding.py`, `settings_dialog.py`, `about_dialog.py`, `startup_errors.py`, `error_dialogs.py` — first-run, settings, diagnostics, startup failure
 
 Named filters are QSettings JSON (filter config only, not result sets) and are also exported in workspace `settings-non-sensitive.json`. Manual priority is SQLite (`manual_priority`), distinct from automatic opportunity score.
 
@@ -87,7 +88,17 @@ Insights rank segments against `contact_to_interest` using percentage-point diff
 
 ## AI
 
-`AIProvider` implements sales prep. Insights explanations are a second Groq JSON call with aggregated payloads (`analytics_insights_v1` / `experiment_summary_v1`). Providers must not send outreach. Groq env (`GROQ_API_KEY`, `GROQ_MODEL`) is read through `config.py`, same as Places keys.
+`AIProvider` implements sales prep. Insights explanations are a second Groq JSON call with aggregated payloads (`analytics_insights_v1` / `experiment_summary_v1`). Providers must not send outreach. Groq and Places secrets are resolved in `desktop/credentials.py` (test override → environment → OS keyring). `config.py` stays the compatibility facade.
+
+## Desktop runtime
+
+`desktop/runtime.py` is the only place that inspects `sys.frozen` / `_MEIPASS`. User data always uses `platformdirs` (`LeadFinder` / `LeadFinder`). The packaged app must not write under `%LOCALAPPDATA%\Programs\LeadFinder`. QSettings identity remains organization `LeadFinder` / application `LeadFinder` so 1.2 settings survive.
+
+Demo Mode uses `leadfinder-demo.db` in the same data directory. Restore/import are disabled while demo is active so a real backup cannot overwrite synthetic data by accident.
+
+Single-instance locking is **not** implemented in 1.3. Two GUI processes on one SQLite file are unsupported; WAL + busy timeout remain.
+
+See [DESKTOP_BUILD.md](DESKTOP_BUILD.md).
 
 ## Paths
 
