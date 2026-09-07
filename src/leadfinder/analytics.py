@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from statistics import median
 
+from leadfinder.labels import OPPORTUNITY_LABELS, PRESENCE_LABELS
 from leadfinder.models import Activity
 from leadfinder.workflow import (
     CONTACT_STATUSES,
@@ -37,26 +38,6 @@ INTERESTED_ONCE_STATUSES = frozenset(
         ContactStatus.WON.value,
     }
 )
-
-PRESENCE_LABELS = {
-    "no_website": "No website",
-    "social_only": "Social only",
-    "link_aggregator": "Link aggregator",
-    "weak_website": "Weak website",
-    "has_website": "Website",
-    "unreachable": "Unreachable",
-    "non_https": "HTTP only",
-    "parked": "Parked",
-    "unknown": "Unknown",
-    "": "Unknown",
-}
-
-OPPORTUNITY_LABELS = {
-    "high": "High",
-    "medium": "Medium",
-    "low": "Low",
-    "": "Unknown",
-}
 
 _STATUS_FROM_LABEL = {status.replace("_", " "): status for status in CONTACT_STATUSES}
 
@@ -617,5 +598,5 @@ def coerce_timezone(name: str) -> tzinfo:
 
     try:
         return ZoneInfo(name)
-    except Exception:  # noqa: BLE001
+    except (KeyError, ValueError):
         return local_timezone()

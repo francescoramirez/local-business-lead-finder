@@ -188,7 +188,7 @@ def test_malformed_json_and_missing_fields() -> None:
 
 
 def test_provider_config_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("leadfinder.ai.provider.load_env_file", lambda: None)
+    monkeypatch.setattr("leadfinder.config.load_env_file", lambda: None)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_MODEL", raising=False)
     assert ai_configured() is False
@@ -302,6 +302,22 @@ def test_groq_malformed_message() -> None:
     class Response:
         def read(self) -> bytes:
             return json.dumps({"choices": [{"message": {"content": "not-json"}}]}).encode()
+
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    provider = GroqProvider("key", model="x", opener=lambda *_a, **_k: Response(), max_retries=0)
+    with pytest.raises(AIResponseValidationError):
+        provider.generate_sales_prep(_request())
+
+
+def test_groq_empty_choices() -> None:
+    class Response:
+        def read(self) -> bytes:
+            return json.dumps({"choices": []}).encode()
 
         def __enter__(self) -> Response:
             return self

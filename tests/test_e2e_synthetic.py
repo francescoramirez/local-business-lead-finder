@@ -75,6 +75,8 @@ def test_synthetic_workspace_flow_and_query_budget(tmp_path: Path) -> None:
     assert after.historical.total_leads == analytics.historical.total_leads
     doctor = service.doctor()
     assert doctor.ok()
+    store.set_manual_priority(ids[0], "high")
+    assert store.get(ids[0]).manual_priority == "high"
     store.close()
 
 
@@ -101,5 +103,52 @@ def test_thousands_of_leads_use_bounded_queries(tmp_path: Path) -> None:
     service.insights_report(days=0)
     store._conn.set_trace_callback(None)
     assert report.historical.total_leads == 2500
+    assert queries["n"] < 80
+    store.close()
+
+
+def test_scale_leads_and_activities(tmp_path: Path) -> None:
+    store = LocalLeadStore(tmp_path / "scale.db")
+    service = LeadService(store)
+    for size in (1000, 10_000):
+        for index in range(size):
+            store.mark_seen(
+                f"ChIJ_SCALE_{size}_{index}",
+                label=f"L{index}",
+                business_preset="cafe",
+                commit=False,
+            )
+        store._conn.commit()
+        queries = {"n": 0}
+
+        def traced(_sql: str, bucket: dict[str, int] = queries) -> None:
+            bucket["n"] += 1
+
+        store._conn.set_trace_callback(traced)
+        report = service.analytics_report(days=0)
+        store._conn.set_trace_callback(None)
+        assert report.historical.total_leads >= size
+        assert queries["n"] < 80
+    place = "ChIJ_SCALE_ACT"
+    store.mark_seen(place, commit=True)
+    stamp = "2026-01-01T00:00:00+00:00"
+    store._conn.executemany(
+        """
+        INSERT INTO activities (
+            place_id, activity_type, created_at, note, contact_method, outcome
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [(place, "note", stamp, str(index), "", "") for index in range(100_000)],
+    )
+    store._conn.commit()
+    queries = {"n": 0}
+
+    def traced_acts(_sql: str) -> None:
+        queries["n"] += 1
+
+    store._conn.set_trace_callback(traced_acts)
+    report = service.analytics_report(days=0)
+    store._conn.set_trace_callback(None)
+    assert report.historical.total_leads >= 1
     assert queries["n"] < 80
     store.close()

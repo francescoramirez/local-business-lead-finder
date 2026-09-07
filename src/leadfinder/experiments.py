@@ -67,7 +67,7 @@ def target_label(experiment: Experiment) -> str:
     if experiment.location:
         parts.append(experiment.location)
     if experiment.digital_presence:
-        from leadfinder.analytics import PRESENCE_LABELS
+        from leadfinder.labels import PRESENCE_LABELS
 
         parts.append(
             PRESENCE_LABELS.get(experiment.digital_presence, experiment.digital_presence)

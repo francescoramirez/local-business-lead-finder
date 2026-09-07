@@ -10,6 +10,7 @@ Limits (documented, enforced):
 
 from __future__ import annotations
 
+import logging
 import ssl
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,6 +23,8 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
 
 from leadfinder.models import Lead, SearchProgress
+
+LOGGER = logging.getLogger("leadfinder")
 
 CONNECT_READ_TIMEOUT = 5.0
 MAX_REDIRECTS = 5
@@ -499,6 +502,7 @@ def _parse_html(body: bytes) -> _HTMLSignals:
         parser.feed(body.decode("utf-8", errors="ignore"))
         parser.close()
     except Exception:  # noqa: BLE001
+        LOGGER.warning("HTML parse failed; keeping partial signals", exc_info=True)
         return parser
     return parser
 

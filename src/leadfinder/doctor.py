@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from leadfinder.config import load_env_file, places_key_configured
+from leadfinder.config import groq_api_key, places_key_configured
 from leadfinder.paths import default_db_path
 from leadfinder.storage.schema import CURRENT_SCHEMA_VERSION, schema_version
 
@@ -38,8 +37,7 @@ def _gui_available() -> tuple[str, str]:
 
 
 def _groq_configured() -> bool:
-    load_env_file()
-    return bool(os.environ.get("GROQ_API_KEY", "").strip())
+    return bool(groq_api_key())
 
 
 def _connect_sqlite(path: Path, *, readonly: bool = False) -> sqlite3.Connection:

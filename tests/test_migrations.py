@@ -46,6 +46,7 @@ def test_migrates_v1_and_preserves_rows(tmp_path: Path) -> None:
     assert state.tags == "priority"
     assert state.first_seen_at.startswith("2026-01-01")
     assert state.next_follow_up_at == ""
+    assert state.manual_priority == "normal"
     store.close()
 
 

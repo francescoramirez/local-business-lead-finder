@@ -4,6 +4,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyMod
 
 from leadfinder.application.service import matches_filters
 from leadfinder.gui.formatters import format_when
+from leadfinder.labels import MANUAL_PRIORITY_LABELS, OPPORTUNITY_LABELS, PRESENCE_LABELS
 from leadfinder.models import CONTACT_STATUS_LABELS, ManagedLead
 from leadfinder.workflow import is_overdue
 
@@ -19,25 +20,10 @@ COLUMNS = (
     "Contact Status",
     "Follow-up",
     "Last activity",
+    "Priority",
 )
 
-WEBSITE_LABELS = {
-    "no_website": "No website",
-    "has_website": "Website",
-    "social_only": "Social only",
-    "link_aggregator": "Link aggregator",
-    "unreachable": "Unreachable",
-    "non_https": "HTTP only",
-    "parked": "Parked",
-    "weak_website": "Weak website",
-    "unknown": "Unknown",
-}
-
-OPPORTUNITY_LABELS = {
-    "high": "High",
-    "medium": "Medium",
-    "low": "Low",
-}
+WEBSITE_LABELS = PRESENCE_LABELS
 
 
 class LeadTableModel(QAbstractTableModel):
@@ -104,6 +90,7 @@ class LeadTableModel(QAbstractTableModel):
                 CONTACT_STATUS_LABELS.get(item.contact_status, item.contact_status),
                 format_when(item.next_follow_up_at),
                 format_when(item.last_activity_at),
+                MANUAL_PRIORITY_LABELS.get(item.manual_priority, item.manual_priority),
             ]
             return values[index.column()]
         if role == Qt.ItemDataRole.UserRole + 1:
@@ -121,6 +108,7 @@ class LeadTableModel(QAbstractTableModel):
                 item.contact_status,
                 follow,
                 activity,
+                item.manual_priority,
             ]
             return keys[index.column()]
         if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in {1, 6, 7}:
@@ -146,6 +134,7 @@ class LeadFilterProxy(QSortFilterProxyModel):
         self.presence = ""
         self.follow_up_view = ""
         self.tag = ""
+        self.manual_priority = ""
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
@@ -162,6 +151,7 @@ class LeadFilterProxy(QSortFilterProxyModel):
         presence: str = "",
         follow_up_view: str = "",
         tag: str = "",
+        manual_priority: str = "",
     ) -> None:
         self.text = text
         self.min_score = min_score
@@ -173,6 +163,7 @@ class LeadFilterProxy(QSortFilterProxyModel):
         self.presence = presence
         self.follow_up_view = follow_up_view
         self.tag = tag
+        self.manual_priority = manual_priority
         self.invalidate()
 
     def filterAcceptsRow(  # type: ignore[override]
@@ -196,6 +187,7 @@ class LeadFilterProxy(QSortFilterProxyModel):
             presence=self.presence,
             follow_up_view=self.follow_up_view,
             tag=self.tag,
+            manual_priority=self.manual_priority,
         )
 
     def lead_from_proxy(self, proxy_row: int) -> ManagedLead | None:

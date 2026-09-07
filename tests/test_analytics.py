@@ -116,6 +116,15 @@ def test_won_still_counts_as_historically_contacted_when_snapshot_moved_back() -
     assert fallback is False
 
 
+def test_current_won_status_counts_historically_as_contacted_and_interested() -> None:
+    lead = _lead("p-won", seen="2026-08-01T12:00:00+00:00", status="won")
+    contacted, interested, won, fallback = historical_flags(lead)
+    assert contacted is True
+    assert interested is True
+    assert won is True
+    assert fallback is True
+
+
 def test_rejected_without_activity_is_not_contacted() -> None:
     lead = _lead("p3", seen="2026-08-01T12:00:00+00:00", status="rejected")
     contacted, interested, won, fallback = historical_flags(lead)

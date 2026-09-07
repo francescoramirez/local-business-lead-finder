@@ -7,6 +7,7 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+from leadfinder import __version__
 from leadfinder.ai.models import (
     INSIGHTS_PROMPT_VERSION,
     MAX_OUTPUT_TOKENS,
@@ -112,7 +113,7 @@ class GroqProvider:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "leadfinder/1.0.0 (local)",
+            "User-Agent": f"leadfinder/{__version__} (local)",
         }
         request = urllib.request.Request(GROQ_CHAT_URL, data=body, headers=headers, method="POST")
         try:
@@ -151,8 +152,11 @@ class GroqProvider:
 def _message_content(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise AINetworkError("AI provider returned an empty response.")
+        raise AIResponseValidationError("AI returned an invalid structured response.")
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     if not isinstance(message, dict):
-        raise AINetworkError("AI provider returned an empty response.")
-    return str(message.get("content") or "")
+        raise AIResponseValidationError("AI returned an invalid structured response.")
+    content = str(message.get("content") or "").strip()
+    if not content:
+        raise AIResponseValidationError("AI returned an invalid structured response.")
+    return content

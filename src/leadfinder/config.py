@@ -20,6 +20,8 @@ from leadfinder.place_types import is_table_a_type
 from leadfinder.presets import get_preset
 
 API_KEY_ENV_VARS = ("GOOGLE_MAPS_API_KEY", "GOOGLE_PLACES_API_KEY")
+GROQ_KEY_ENV = "GROQ_API_KEY"
+GROQ_MODEL_ENV = "GROQ_MODEL"
 MAX_PAGES = 3
 MAX_PAGE_SIZE = 20
 DEFAULT_OUTPUT_DIR = Path("output")
@@ -162,6 +164,16 @@ def get_api_key() -> str:
         "Missing Places API key. Set GOOGLE_MAPS_API_KEY or GOOGLE_PLACES_API_KEY "
         "in the environment or a local .env file. See .env.example."
     )
+
+
+def groq_api_key() -> str:
+    load_env_file()
+    return os.getenv(GROQ_KEY_ENV, "").strip()
+
+
+def groq_model_from_env() -> str:
+    load_env_file()
+    return os.getenv(GROQ_MODEL_ENV, "").strip()
 
 
 def parse_locations(*values: str) -> list[str]:

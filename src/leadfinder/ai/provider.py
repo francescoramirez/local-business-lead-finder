@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Protocol
 
 from leadfinder.ai.models import (
@@ -12,7 +11,7 @@ from leadfinder.ai.models import (
     SalesPrepRequest,
     SalesPrepResult,
 )
-from leadfinder.config import load_env_file
+from leadfinder.config import groq_api_key, groq_model_from_env
 from leadfinder.errors import AINotConfiguredError, AIResponseValidationError
 
 
@@ -21,16 +20,10 @@ class AIProvider(Protocol):
         """Return structured sales prep. Must not send outreach."""
 
 
-def groq_api_key() -> str:
-    load_env_file()
-    return os.environ.get("GROQ_API_KEY", "").strip()
-
-
 def groq_model(override: str = "") -> str:
     if override.strip():
         return override.strip()
-    load_env_file()
-    return os.environ.get("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL
+    return groq_model_from_env() or DEFAULT_GROQ_MODEL
 
 
 def ai_configured() -> bool:

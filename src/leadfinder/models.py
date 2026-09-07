@@ -177,6 +177,7 @@ class LocalLeadState:
     country: str = ""
     website_status: str = ""
     campaign_id: int = 0
+    manual_priority: str = "normal"
 
 
 @dataclass
@@ -254,3 +255,4 @@ class ManagedLead:
     last_activity_at: str = ""
     tags: str = ""
     label: str = ""
+    manual_priority: str = "normal"

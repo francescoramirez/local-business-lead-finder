@@ -12,21 +12,10 @@ from leadfinder.ai.models import (
     SalesPrepResult,
 )
 from leadfinder.ai.provider import AIProvider, groq_model
+from leadfinder.labels import PRESENCE_LABELS
 from leadfinder.models import ManagedLead
 
 _SECRET_HINT = re.compile(r"(?:aiza|gsk_)[0-9a-za-z_-]{10,}", re.IGNORECASE)
-
-PRESENCE_LABELS = {
-    "no_website": "No website",
-    "has_website": "Website",
-    "social_only": "Social only",
-    "link_aggregator": "Link aggregator",
-    "unreachable": "Unreachable",
-    "non_https": "HTTP only",
-    "parked": "Parked",
-    "weak_website": "Weak website",
-    "unknown": "Unknown",
-}
 
 
 FORBIDDEN_REQUEST_KEYS = frozenset(

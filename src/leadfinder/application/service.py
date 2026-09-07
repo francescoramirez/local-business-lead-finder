@@ -128,6 +128,7 @@ def apply_state(item: ManagedLead, state: LocalLeadState) -> ManagedLead:
     item.last_activity_at = state.last_activity_at
     item.tags = state.tags
     item.label = state.label
+    item.manual_priority = state.manual_priority
     item.previously_seen = True
     return item
 
@@ -187,6 +188,7 @@ def matches_filters(
     presence: str = "",
     follow_up_view: str = "",
     tag: str = "",
+    manual_priority: str = "",
 ) -> bool:
     lead = item.lead
     needle = text.strip().lower()
@@ -227,6 +229,8 @@ def matches_filters(
     if tag:
         if tag.strip().lower() not in parse_tags(item.tags):
             return False
+    if manual_priority and item.manual_priority != manual_priority:
+        return False
     if follow_up_view and not matches_follow_up_view(
         item.contact_status, item.next_follow_up_at, follow_up_view
     ):
@@ -361,6 +365,10 @@ class LeadService:
 
     def set_tags(self, item: ManagedLead, tags: str) -> ManagedLead:
         state = self.store.set_tags(item.lead.place_id, tags)
+        return apply_state(item, state)
+
+    def set_priority(self, item: ManagedLead, priority: str) -> ManagedLead:
+        state = self.store.set_manual_priority(item.lead.place_id, priority)
         return apply_state(item, state)
 
     def set_follow_up(self, item: ManagedLead, when: str) -> ManagedLead:

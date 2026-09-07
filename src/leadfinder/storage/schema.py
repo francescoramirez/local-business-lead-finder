@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 _V1_LEADS = """
 CREATE TABLE IF NOT EXISTS leads_local (
@@ -183,6 +183,10 @@ def migrate(conn: sqlite3.Connection) -> int:
             """
         )
         version = 6
+        _set_version(conn, version)
+    if version < 7:
+        _add_column(conn, "leads_local", "manual_priority TEXT NOT NULL DEFAULT 'normal'")
+        version = 7
         _set_version(conn, version)
     conn.commit()
     return version

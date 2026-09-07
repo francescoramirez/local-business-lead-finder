@@ -5,28 +5,16 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QFileDialog,
-    QFormLayout,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
+    QInputDialog,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSpinBox,
     QSplitter,
     QStatusBar,
     QTableView,
     QTabWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -36,14 +24,16 @@ from leadfinder.ai.provider import ai_configured, groq_model
 from leadfinder.analytics import compare_reports
 from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
+from leadfinder.duplicates import duplicate_hint
 from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError
-from leadfinder.fields import FIELD_PROFILES
 from leadfinder.gui.analytics_page import AnalyticsPage, custom_bounds, export_report_dialog
 from leadfinder.gui.dashboard_page import DashboardPage
 from leadfinder.gui.dialogs import ActivityDialog, CampaignDialog, ExperimentDialog, FollowUpDialog
 from leadfinder.gui.experiments_page import ExperimentsPage
+from leadfinder.gui.filter_bar import FilterBar
 from leadfinder.gui.formatters import format_when
 from leadfinder.gui.insights_page import InsightsPage
+from leadfinder.gui.lead_details import LeadDetailsPanel
 from leadfinder.gui.lead_model import (
     OPPORTUNITY_LABELS,
     WEBSITE_LABELS,
@@ -52,18 +42,21 @@ from leadfinder.gui.lead_model import (
 )
 from leadfinder.gui.pipeline_page import PipelinePage
 from leadfinder.gui.prospects_page import ProspectsPage
-from leadfinder.gui.sales_prep import SalesPrepPanel
+from leadfinder.gui.saved_filters import (
+    all_named_filters,
+    load_custom_filters,
+    store_custom_filters,
+)
+from leadfinder.gui.search_panel import SearchPanel
 from leadfinder.gui.workers import AnalyzeWorker, InsightsWorker, SalesPrepWorker, SearchWorker
 from leadfinder.insights import SegmentInsight
 from leadfinder.models import (
     CONTACT_STATUS_LABELS,
-    CONTACT_STATUSES,
     ManagedLead,
     SearchPlan,
     SearchProgress,
     SearchReport,
 )
-from leadfinder.presets import list_presets
 from leadfinder.workflow import ACTIVITY_TYPE_LABELS, ContactStatus
 
 
@@ -97,174 +90,84 @@ class MainWindow(QMainWindow):
         self._update_empty_state()
         self._refresh_secondary()
 
+    def _bind_search_panel(self, panel: SearchPanel) -> None:
+        self.preset = panel.preset
+        self.location = panel.location
+        self.region = panel.region
+        self.country = panel.country
+        self.coverage = panel.coverage
+        self.fields = panel.fields
+        self.max_requests = panel.max_requests
+        self.pages = panel.pages
+        self.analyze = panel.analyze
+        self.only_no_website = panel.only_no_website
+        self.dry_run_btn = panel.dry_run_btn
+        self.search_btn = panel.search_btn
+        self.cancel_btn = panel.cancel_btn
+        self.export_csv_btn = panel.export_csv_btn
+        self.export_json_btn = panel.export_json_btn
+        self.export_visible = panel.export_visible
+        self.analyze_now_btn = panel.analyze_now_btn
+        self.export_pipeline_btn = panel.export_pipeline_btn
+        self.campaign = panel.campaign
+        self.new_campaign_btn = panel.new_campaign_btn
+        self.cost_preview = panel.cost_preview
+        self.ai_status = panel.ai_status
+        self.summary = panel.summary
+        self.progress = panel.progress
+        self.progress_label = panel.progress_label
+        self.counters = panel.counters
+
+    def _bind_filter_bar(self, bar: FilterBar) -> None:
+        self.filter_text = bar.filter_text
+        self.min_score = bar.min_score
+        self.filter_no_website = bar.filter_no_website
+        self.filter_phone = bar.filter_phone
+        self.filter_operational = bar.filter_operational
+        self.filter_status = bar.filter_status
+        self.filter_opportunity = bar.filter_opportunity
+        self.filter_presence = bar.filter_presence
+        self.filter_follow = bar.filter_follow
+        self.filter_priority = bar.filter_priority
+        self.filter_tag = bar.filter_tag
+        self.saved_filters = bar.saved_filters
+        self.save_filter_btn = bar.save_filter_btn
+
+    def _bind_details(self, panel: LeadDetailsPanel) -> None:
+        self.detail_name = panel.detail_name
+        self.detail_score = panel.detail_score
+        self.detail_reason = panel.detail_reason
+        self.detail_presence = panel.detail_presence
+        self.detail_meta = panel.detail_meta
+        self.detail_seen = panel.detail_seen
+        self.detail_duplicate = panel.detail_duplicate
+        self.open_maps = panel.open_maps
+        self.open_website = panel.open_website
+        self.mark_contacted_btn = panel.mark_contacted_btn
+        self.mark_interested_btn = panel.mark_interested_btn
+        self.schedule_btn = panel.schedule_btn
+        self.activity_btn = panel.activity_btn
+        self.contact_status = panel.contact_status
+        self.manual_priority = panel.manual_priority
+        self.notes = panel.notes
+        self.tags_edit = panel.tags_edit
+        self.follow_label = panel.follow_label
+        self.detail_activity = panel.detail_activity
+        self.sales_prep = panel.sales_prep
+        self.detail_tabs = panel.detail_tabs
+
     def _build_ui(self) -> None:
         header = QLabel("LeadFinder")
         header.setObjectName("title")
         subtitle = QLabel("Discover → Qualify → Track → Analyze → Improve")
         subtitle.setObjectName("hint")
 
-        self.preset = QComboBox()
-        for preset in list_presets():
-            self.preset.addItem(preset.display_label(), preset.name)
-        self.location = QLineEdit()
-        self.location.setPlaceholderText("Mar del Plata")
-        self.region = QLineEdit()
-        self.region.setPlaceholderText("Buenos Aires")
-        self.country = QLineEdit()
-        self.country.setMaxLength(2)
-        self.coverage = QComboBox()
-        self.coverage.addItems(["budget", "balanced", "full"])
-        self.fields = QComboBox()
-        self.fields.addItems(sorted(FIELD_PROFILES))
-        self.fields.setCurrentText("enterprise")
-        self.max_requests = QSpinBox()
-        self.max_requests.setRange(1, 500)
-        self.max_requests.setValue(100)
-        self.pages = QSpinBox()
-        self.pages.setRange(1, 3)
-        self.pages.setValue(1)
-        self.analyze = QCheckBox("Analyze websites")
-        self.only_no_website = QCheckBox("No website only")
-        self.dry_run_btn = QPushButton("Dry Run")
-        self.search_btn = QPushButton("Search")
-        self.search_btn.setObjectName("primary")
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setEnabled(False)
-        self.export_csv_btn = QPushButton("Export CSV")
-        self.export_json_btn = QPushButton("Export JSON")
-        self.export_visible = QCheckBox("Export visible rows only")
-        self.export_visible.setChecked(True)
-        self.analyze_now_btn = QPushButton("Analyze websites")
-        self.export_pipeline_btn = QPushButton("Export pipeline")
-
-        target_form = QFormLayout()
-        target_form.addRow("Business", self.preset)
-        target_form.addRow("Location", self.location)
-        target_form.addRow("Region", self.region)
-        target_form.addRow("Country", self.country)
-        self.campaign = QComboBox()
-        self.new_campaign_btn = QPushButton("New Campaign")
-        campaign_row = QHBoxLayout()
-        campaign_row.addWidget(self.campaign, 1)
-        campaign_row.addWidget(self.new_campaign_btn)
-        target_form.addRow("Campaign", campaign_row)
-        target_box = QGroupBox("Target")
-        target_box.setLayout(target_form)
-
-        cost_form = QFormLayout()
-        cost_form.addRow("Coverage", self.coverage)
-        cost_form.addRow("Fields", self.fields)
-        cost_form.addRow("Max requests", self.max_requests)
-        cost_form.addRow("Pages", self.pages)
-        self.cost_preview = QLabel("Dry Run to preview request volume.")
-        self.cost_preview.setObjectName("hint")
-        self.cost_preview.setWordWrap(True)
-        cost_form.addRow(self.cost_preview)
-        cost_box = QGroupBox("Cost and volume")
-        cost_box.setLayout(cost_form)
-
-        filter_form = QFormLayout()
-        filter_form.addRow(self.analyze)
-        filter_form.addRow(self.only_no_website)
-        filter_box = QGroupBox("Qualification")
-        filter_box.setLayout(filter_form)
-
-        buttons = QGridLayout()
-        buttons.addWidget(self.dry_run_btn, 0, 0)
-        buttons.addWidget(self.search_btn, 0, 1)
-        buttons.addWidget(self.cancel_btn, 1, 0)
-        buttons.addWidget(self.export_csv_btn, 1, 1)
-        buttons.addWidget(self.export_json_btn, 2, 0)
-        buttons.addWidget(self.analyze_now_btn, 2, 1)
-        buttons.addWidget(self.export_visible, 3, 0)
-        buttons.addWidget(self.export_pipeline_btn, 3, 1)
-        search_box = QGroupBox("Search")
-        search_layout = QVBoxLayout(search_box)
-        search_layout.addWidget(target_box)
-        search_layout.addWidget(cost_box)
-        search_layout.addWidget(filter_box)
-        search_layout.addLayout(buttons)
-        search_layout.addStretch()
-
-        self.ai_status = QLabel("")
-        self.ai_status.setObjectName("hint")
-        self.ai_status.setWordWrap(True)
-        ai_box = QGroupBox("AI")
-        ai_layout = QVBoxLayout(ai_box)
-        ai_layout.addWidget(self.ai_status)
-
-        self.summary = QPlainTextEdit()
-        self.summary.setReadOnly(True)
-        self.summary.setPlaceholderText("Run Dry Run to preview cost, or Search to load leads.")
-        summary_box = QGroupBox("Summary")
-        summary_layout = QVBoxLayout(summary_box)
-        summary_layout.addWidget(self.summary)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        self.progress_label = QLabel("Idle")
-        self.progress_label.setObjectName("hint")
-        self.counters = QLabel("Requests 0  ·  Places 0  ·  Leads 0")
-        self.counters.setObjectName("hint")
-
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(search_box, 3)
-        left_layout.addWidget(ai_box, 0)
-        left_layout.addWidget(summary_box, 2)
-        left_layout.addWidget(self.progress)
-        left_layout.addWidget(self.progress_label)
-        left_layout.addWidget(self.counters)
-
-        self.filter_text = QLineEdit()
-        self.filter_text.setPlaceholderText("Filter leads…")
-        self.min_score = QSpinBox()
-        self.min_score.setRange(0, 100)
-        self.filter_no_website = QCheckBox("No website")
-        self.filter_phone = QCheckBox("Has phone")
-        self.filter_operational = QCheckBox("Operational")
-        self.filter_operational.setChecked(True)
-        self.filter_status = QComboBox()
-        self.filter_status.addItem("Any status", "")
-        for status in CONTACT_STATUSES:
-            self.filter_status.addItem(CONTACT_STATUS_LABELS[status], status)
-        self.filter_opportunity = QComboBox()
-        self.filter_opportunity.addItem("All opportunities", "")
-        self.filter_opportunity.addItem("High", "high")
-        self.filter_opportunity.addItem("Medium", "medium")
-        self.filter_opportunity.addItem("Low", "low")
-        self.filter_presence = QComboBox()
-        self.filter_presence.addItem("All presence", "")
-        self.filter_presence.addItem("No website", "no_website")
-        self.filter_presence.addItem("Social only", "social_only")
-        self.filter_presence.addItem("Link aggregator", "link_aggregator")
-        self.filter_presence.addItem("Website", "website")
-        self.filter_presence.addItem("Unreachable", "unreachable")
-        self.filter_follow = QComboBox()
-        self.filter_follow.addItem("Any follow-up", "")
-        self.filter_follow.addItem("Needs follow-up", "needs")
-        self.filter_follow.addItem("Due today", "due_today")
-        self.filter_follow.addItem("Overdue", "overdue")
-        self.filter_follow.addItem("Upcoming", "upcoming")
-        self.filter_follow.addItem("No follow-up", "none")
-        self.filter_tag = QLineEdit()
-        self.filter_tag.setPlaceholderText("Tag")
-        self.filter_tag.setMaximumWidth(120)
-        filters = QHBoxLayout()
-        filters.addWidget(QLabel("Find"))
-        filters.addWidget(self.filter_text, 1)
-        filters.addWidget(QLabel("Min score"))
-        filters.addWidget(self.min_score)
-        filters.addWidget(self.filter_opportunity)
-        filters.addWidget(self.filter_presence)
-        filters.addWidget(self.filter_follow)
-        filters.addWidget(self.filter_tag)
-        filters.addWidget(self.filter_no_website)
-        filters.addWidget(self.filter_phone)
-        filters.addWidget(self.filter_operational)
-        filters.addWidget(self.filter_status)
+        self.search_panel = SearchPanel()
+        self._bind_search_panel(self.search_panel)
+        self.filter_bar = FilterBar()
+        self._bind_filter_bar(self.filter_bar)
+        self.details_panel = LeadDetailsPanel()
+        self._bind_details(self.details_panel)
 
         self.table = QTableView()
         self.table.setModel(self.proxy)
@@ -287,89 +190,18 @@ class MainWindow(QMainWindow):
         table_wrap = QWidget()
         table_layout = QVBoxLayout(table_wrap)
         table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.addLayout(filters)
+        table_layout.addWidget(self.filter_bar)
         table_layout.addWidget(self.table)
         table_layout.addWidget(self.empty)
 
-        self.detail_name = QLabel("Select a lead")
-        self.detail_name.setStyleSheet("font-size: 16px; font-weight: 700;")
-        self.detail_score = QLabel("")
-        self.detail_reason = QLabel("")
-        self.detail_reason.setWordWrap(True)
-        self.detail_reason.setObjectName("hint")
-        self.detail_presence = QLabel("")
-        self.detail_presence.setWordWrap(True)
-        self.detail_meta = QLabel("")
-        self.detail_meta.setWordWrap(True)
-        self.detail_seen = QLabel("")
-        self.open_maps = QPushButton("Open in Google Maps")
-        self.open_maps.setEnabled(False)
-        self.open_website = QPushButton("Open website")
-        self.open_website.setEnabled(False)
-        self.mark_contacted_btn = QPushButton("Mark contacted")
-        self.mark_interested_btn = QPushButton("Mark interested")
-        self.schedule_btn = QPushButton("Schedule follow-up")
-        self.activity_btn = QPushButton("Add activity")
-        self.contact_status = QComboBox()
-        for status in CONTACT_STATUSES:
-            self.contact_status.addItem(CONTACT_STATUS_LABELS[status], status)
-        self.notes = QTextEdit()
-        self.notes.setPlaceholderText("Notes are saved automatically.")
-        self.tags_edit = QLineEdit()
-        self.tags_edit.setPlaceholderText("tags, comma-separated")
-        self.follow_label = QLabel("No follow-up scheduled")
-        self.detail_activity = QPlainTextEdit()
-        self.detail_activity.setReadOnly(True)
-        self.detail_activity.setMaximumHeight(140)
-        overview = QWidget()
-        details_layout = QVBoxLayout(overview)
-        details_layout.addWidget(QLabel("Overview"))
-        details_layout.addWidget(self.detail_name)
-        details_layout.addWidget(self.detail_score)
-        details_layout.addWidget(self.detail_reason)
-        details_layout.addWidget(self.detail_meta)
-        details_layout.addWidget(self.detail_seen)
-        details_layout.addWidget(QLabel("Digital presence"))
-        details_layout.addWidget(self.detail_presence)
-        actions = QHBoxLayout()
-        actions.addWidget(self.mark_contacted_btn)
-        actions.addWidget(self.mark_interested_btn)
-        actions.addWidget(self.schedule_btn)
-        actions.addWidget(self.activity_btn)
-        details_layout.addLayout(actions)
-        links = QHBoxLayout()
-        links.addWidget(self.open_maps)
-        links.addWidget(self.open_website)
-        details_layout.addLayout(links)
-        details_layout.addWidget(QLabel("Workflow"))
-        details_form = QFormLayout()
-        details_form.addRow("Contact status", self.contact_status)
-        details_form.addRow("Next follow-up", self.follow_label)
-        details_form.addRow("Tags", self.tags_edit)
-        details_layout.addLayout(details_form)
-        details_layout.addWidget(QLabel("Notes"))
-        details_layout.addWidget(self.notes)
-        details_layout.addWidget(QLabel("Activity"))
-        details_layout.addWidget(self.detail_activity)
-
-        self.sales_prep = SalesPrepPanel()
-        prep_scroll = QScrollArea()
-        prep_scroll.setWidgetResizable(True)
-        prep_scroll.setWidget(self.sales_prep)
-        self.detail_tabs = QTabWidget()
-        self.detail_tabs.addTab(overview, "Overview")
-        self.detail_tabs.addTab(prep_scroll, "Sales Prep")
-        details = QGroupBox("Lead details")
-        details_outer = QVBoxLayout(details)
-        details_outer.addWidget(self.detail_tabs)
         right_split = QSplitter(Qt.Orientation.Vertical)
         right_split.addWidget(table_wrap)
-        right_split.addWidget(details)
+        right_split.addWidget(self.details_panel)
         right_split.setStretchFactor(0, 3)
         right_split.setStretchFactor(1, 2)
 
         split = QSplitter()
-        split.addWidget(left)
+        split.addWidget(self.search_panel)
         split.addWidget(right_split)
         split.setStretchFactor(0, 0)
         split.setStretchFactor(1, 1)
@@ -451,10 +283,14 @@ class MainWindow(QMainWindow):
         self.filter_opportunity.currentIndexChanged.connect(self._apply_filters)
         self.filter_presence.currentIndexChanged.connect(self._apply_filters)
         self.filter_follow.currentIndexChanged.connect(self._apply_filters)
+        self.filter_priority.currentIndexChanged.connect(self._apply_filters)
         self.filter_tag.textChanged.connect(self._apply_filters)
+        self.saved_filters.currentIndexChanged.connect(self._apply_saved_filter)
+        self.save_filter_btn.clicked.connect(self._save_current_filter)
         self.table.selectionModel().selectionChanged.connect(self._on_selection)
         self.table.customContextMenuRequested.connect(self._table_menu)
         self.contact_status.currentIndexChanged.connect(self._on_status_changed)
+        self.manual_priority.currentIndexChanged.connect(self._on_priority_changed)
         self.notes.textChanged.connect(self._schedule_notes_save)
         self.tags_edit.editingFinished.connect(self._save_tags)
         self.open_maps.clicked.connect(self._open_maps)
@@ -692,6 +528,7 @@ class MainWindow(QMainWindow):
             presence=str(self.filter_presence.currentData() or ""),
             follow_up_view=str(self.filter_follow.currentData() or ""),
             tag=self.filter_tag.text(),
+            manual_priority=str(self.filter_priority.currentData() or ""),
         )
         self._update_empty_state()
 
@@ -757,12 +594,17 @@ class MainWindow(QMainWindow):
         if item.contact_status != "new":
             seen += f"  ·  {CONTACT_STATUS_LABELS.get(item.contact_status, item.contact_status)}"
         self.detail_seen.setText(seen)
+        hint = duplicate_hint(item, self.model.leads())
+        self.detail_duplicate.setText(hint)
+        self.detail_duplicate.setVisible(bool(hint))
         self.follow_label.setText(format_when(item.next_follow_up_at))
         self.tags_edit.setText(item.tags)
         self.open_maps.setEnabled(bool(lead.google_maps_url))
         self.open_website.setEnabled(bool(lead.website))
         index = self.contact_status.findData(item.contact_status)
         self.contact_status.setCurrentIndex(max(index, 0))
+        p_index = self.manual_priority.findData(item.manual_priority or "normal")
+        self.manual_priority.setCurrentIndex(max(p_index, 0))
         self.notes.setPlainText(item.notes)
         self._render_activity(item.lead.place_id)
         cached = self._prep_cache.get(item.lead.place_id)
@@ -781,6 +623,15 @@ class MainWindow(QMainWindow):
         self.model.update_row(updated)
         self._show_lead(updated)
         self._refresh_secondary()
+
+    def _on_priority_changed(self) -> None:
+        if self._updating_details or self._selected is None:
+            return
+        priority = str(self.manual_priority.currentData() or "normal")
+        updated = self.service.set_priority(self._selected, priority)
+        self._selected = updated
+        self.model.update_row(updated)
+        self._show_lead(updated)
 
     def _schedule_notes_save(self) -> None:
         if self._updating_details:
@@ -1025,7 +876,7 @@ class MainWindow(QMainWindow):
             return
         language = self.sales_prep.language_value()
         self._insights_worker = InsightsWorker(
-            self.service, source, language=language, experiment=experiment
+            self.service, source, language=language, experiment=experiment, parent=self
         )
         self._insights_worker.succeeded.connect(self._on_insights_ready)
         self._insights_worker.failed.connect(self._on_insights_failed)
@@ -1320,10 +1171,70 @@ class MainWindow(QMainWindow):
         if header_state:
             try:
                 self.table.horizontalHeader().restoreState(header_state)
-            except Exception:
+            except (TypeError, ValueError, RuntimeError):
                 pass
+        self._reload_saved_filter_names()
         self._refresh_ai_status()
         self._update_cost_preview()
+
+    def _reload_saved_filter_names(self) -> None:
+        current = self.saved_filters.currentText()
+        self.saved_filters.blockSignals(True)
+        self.saved_filters.clear()
+        self.saved_filters.addItem("Saved filters…", "")
+        for name in all_named_filters(self.settings):
+            self.saved_filters.addItem(name, name)
+        index = self.saved_filters.findText(current)
+        self.saved_filters.setCurrentIndex(max(index, 0))
+        self.saved_filters.blockSignals(False)
+
+    def _apply_saved_filter(self) -> None:
+        name = str(self.saved_filters.currentData() or "")
+        spec = all_named_filters(self.settings).get(name)
+        if not spec:
+            return
+        self.filter_text.setText(str(spec.get("text") or ""))
+        self.min_score.setValue(int(spec.get("min_score") or 0))
+        self.filter_no_website.setChecked(bool(spec.get("no_website")))
+        self.filter_phone.setChecked(bool(spec.get("has_phone")))
+        self.filter_operational.setChecked(bool(spec.get("operational", True)))
+        self._set_combo(self.filter_status, str(spec.get("status") or ""))
+        self._set_combo(self.filter_opportunity, str(spec.get("opportunity") or ""))
+        self._set_combo(self.filter_presence, str(spec.get("presence") or ""))
+        self._set_combo(self.filter_follow, str(spec.get("follow") or ""))
+        self._set_combo(self.filter_priority, str(spec.get("priority") or ""))
+        self.filter_tag.setText(str(spec.get("tag") or ""))
+
+    def _set_combo(self, combo, value: str) -> None:
+        index = combo.findData(value)
+        combo.setCurrentIndex(max(index, 0))
+
+    def _current_filter_spec(self) -> dict:
+        return {
+            "text": self.filter_text.text(),
+            "min_score": self.min_score.value(),
+            "no_website": self.filter_no_website.isChecked(),
+            "has_phone": self.filter_phone.isChecked(),
+            "operational": self.filter_operational.isChecked(),
+            "status": str(self.filter_status.currentData() or ""),
+            "opportunity": str(self.filter_opportunity.currentData() or ""),
+            "presence": str(self.filter_presence.currentData() or ""),
+            "follow": str(self.filter_follow.currentData() or ""),
+            "tag": self.filter_tag.text(),
+            "priority": str(self.filter_priority.currentData() or ""),
+        }
+
+    def _save_current_filter(self) -> None:
+        name, ok = QInputDialog.getText(self, "Save filter", "Filter name")
+        if not ok or not name.strip():
+            return
+        custom = load_custom_filters(self.settings)
+        custom[name.strip()] = self._current_filter_spec()
+        store_custom_filters(self.settings, custom)
+        self._reload_saved_filter_names()
+        index = self.saved_filters.findText(name.strip())
+        if index >= 0:
+            self.saved_filters.setCurrentIndex(index)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_notes()

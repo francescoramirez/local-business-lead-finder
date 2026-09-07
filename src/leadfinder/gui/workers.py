@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import QObject, QThread, Signal
 
@@ -10,6 +12,16 @@ from leadfinder.digital_presence import PresenceAnalyzer
 from leadfinder.errors import LeadFinderError
 from leadfinder.models import ManagedLead, SearchProgress
 from leadfinder.places_client import PlacesClient
+
+LOGGER = logging.getLogger("leadfinder")
+
+
+def emit_failure(failed: Any, error: Exception) -> None:
+    if isinstance(error, LeadFinderError):
+        failed.emit(friendly_error(error))
+        return
+    LOGGER.exception("Unexpected worker error")
+    failed.emit(friendly_error(error))
 
 
 class SearchWorker(QThread):
@@ -47,10 +59,8 @@ class SearchWorker(QThread):
                 campaign_id=self._campaign_id,
             )
             self.succeeded.emit(report, managed)
-        except LeadFinderError as error:
-            self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            self.failed.emit(friendly_error(error))
+            emit_failure(self.failed, error)
 
     def _on_progress(self, event: SearchProgress) -> None:
         self.progressed.emit(event)
@@ -87,10 +97,8 @@ class AnalyzeWorker(QThread):
                 is_cancelled=lambda: self._cancel,
             )
             self.succeeded.emit(updated)
-        except LeadFinderError as error:
-            self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            self.failed.emit(friendly_error(error))
+            emit_failure(self.failed, error)
 
     def _on_progress(self, event: SearchProgress) -> None:
         self.progressed.emit(event)
@@ -123,10 +131,8 @@ class SalesPrepWorker(QThread):
                 model=self._model,
             )
             self.succeeded.emit(result)
-        except LeadFinderError as error:
-            self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            self.failed.emit(friendly_error(error))
+            emit_failure(self.failed, error)
 
 
 class InsightsWorker(QThread):
@@ -156,7 +162,5 @@ class InsightsWorker(QThread):
                 experiment=self._experiment,
             )
             self.succeeded.emit(result)
-        except LeadFinderError as error:
-            self.failed.emit(friendly_error(error))
         except Exception as error:  # noqa: BLE001
-            self.failed.emit(friendly_error(error))
+            emit_failure(self.failed, error)

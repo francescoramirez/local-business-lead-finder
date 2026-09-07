@@ -4,7 +4,7 @@ Cost-aware Python CLI and desktop app for discovering, qualifying, preparing, an
 
 [![CI](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoramirez/local-business-lead-finder/actions/workflows/ci.yml)
 
-Independent project. **Not affiliated with Google.** Version **1.0.0**.
+Independent project. **Not affiliated with Google.** Version **1.1.0**.
 
 **Stack:** Python 3.10+ · Google Places API (New) · Typer · Rich · PySide6 · SQLite · optional Groq · pytest · Ruff · mypy · GitHub Actions
 
@@ -51,13 +51,13 @@ Desktop tabs: **Search**, **Pipeline**, **Prospects**, **Dashboard**, **Learn** 
 
 **Qualification** — deterministic lead scoring and optional digital-presence checks (no crawl, no JavaScript).
 
-**Desktop workflow** — pipeline, follow-ups, activity history, campaigns. Outreach is always manual.
+**Desktop workflow** — pipeline, follow-ups, activity history, campaigns, manual priority, saved filters, conservative duplicate hints. Outreach is always manual.
 
 **Analytics** — snapshot (today) vs historical conversions. Insights rank segments vs baseline in **percentage points**. Experiments store a hypothesis and compare observed rate vs baseline without declaring scientific success/failure.
 
 **AI (optional)** — Groq Sales Prep for one selected lead after **Generate**. Insights/experiment explanations send **aggregates only**.
 
-**Local data** — SQLite under the OS app-data directory (`platformdirs`). Backup / restore / workspace ZIP / `leadfinder doctor`.
+**Local data** — SQLite under the OS app-data directory (`platformdirs`). Backup / restore / workspace ZIP / `leadfinder doctor`. 1.1 hardens internals (storage/GUI split) without changing the local-first product.
 
 ## Screenshots
 
@@ -144,9 +144,9 @@ leadfinder doctor
 leadfinder gui
 ```
 
-## After 1.0
+## After 1.1
 
-Keep the product local-first. Likely next: real GUI screenshots, optional workspace merge refinements, and more campaign notes. No outreach automation.
+Keep the product local-first. Do not add outreach automation.
 
 ## License
 

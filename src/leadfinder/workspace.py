@@ -122,6 +122,7 @@ def _state_export(item: LocalLeadState) -> dict[str, object]:
         "country": item.country,
         "website_status": item.website_status,
         "campaign_id": item.campaign_id,
+        "manual_priority": item.manual_priority,
     }
 
 

@@ -306,3 +306,38 @@ def test_analytics_tab_empty_and_populated(qapp, tmp_path: Path) -> None:
     window.close()
 
 
+def test_saved_filters_and_priority_widgets(qapp, tmp_path: Path) -> None:
+    service = LeadService(LocalLeadStore(tmp_path / "gui11.db"))
+    window = MainWindow(service)
+    assert window.filter_priority.count() >= 4
+    assert window.saved_filters.count() >= 2
+    window.saved_filters.setCurrentIndex(window.saved_filters.findText("New"))
+    window._apply_saved_filter()
+    assert window.filter_status.currentData() == "new"
+    window.close()
+
+
+def test_unexpected_worker_logs_traceback(
+    qapp, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from leadfinder.config import SearchConfig
+    from leadfinder.gui.workers import SearchWorker
+
+    service = LeadService(LocalLeadStore(tmp_path / "boom.db"))
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("unexpected-kaboom")
+
+    service.search = boom  # type: ignore[method-assign]
+    caplog.set_level(logging.ERROR, logger="leadfinder")
+    worker = SearchWorker(service, SearchConfig(locations=["Example City"]))
+    messages: list[str] = []
+    worker.failed.connect(messages.append)
+    worker.run()
+    assert messages
+    assert "Something went wrong" in messages[0]
+    assert "unexpected-kaboom" in caplog.text
+
+
