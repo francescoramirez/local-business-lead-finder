@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-business-lead-finder"
-version = "0.5.0"
-description = "Cost-aware Python CLI and desktop app for discovering, qualifying, and preparing local business leads."
+version = "1.0.0"
+description = "Local-first CLI and desktop app to discover, qualify, prepare, and measure local business leads."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "FrancescoRamirezC" }]
 keywords = ["leads", "local-business", "google-places", "cli"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",

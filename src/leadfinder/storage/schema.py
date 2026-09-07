@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 6
 
 _V1_LEADS = """
 CREATE TABLE IF NOT EXISTS leads_local (
@@ -114,6 +114,75 @@ def migrate(conn: sqlite3.Connection) -> int:
             """
         )
         version = 4
+        _set_version(conn, version)
+    if version < 5:
+        _add_column(conn, "search_runs", "campaign_id INTEGER")
+        _add_column(conn, "leads_local", "business_preset TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "leads_local", "source_location TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "leads_local", "region TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "leads_local", "country TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "leads_local", "website_status TEXT NOT NULL DEFAULT ''")
+        _add_column(conn, "leads_local", "campaign_id INTEGER")
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                business_preset TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                region TEXT NOT NULL DEFAULT '',
+                country TEXT NOT NULL DEFAULT '',
+                auto_created INTEGER NOT NULL DEFAULT 0,
+                local_day TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS campaign_leads (
+                campaign_id INTEGER NOT NULL,
+                place_id TEXT NOT NULL,
+                PRIMARY KEY (campaign_id, place_id),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id),
+                FOREIGN KEY(place_id) REFERENCES leads_local(place_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_campaigns_created ON campaigns(created_at);
+            CREATE INDEX IF NOT EXISTS idx_campaign_leads_place ON campaign_leads(place_id);
+            CREATE INDEX IF NOT EXISTS idx_activities_created ON activities(created_at);
+            CREATE INDEX IF NOT EXISTS idx_search_runs_campaign ON search_runs(campaign_id);
+            """
+        )
+        version = 5
+        _set_version(conn, version)
+    if version < 6:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS experiments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                hypothesis TEXT NOT NULL DEFAULT '',
+                business_preset TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '',
+                digital_presence TEXT NOT NULL DEFAULT '',
+                opportunity_level TEXT NOT NULL DEFAULT '',
+                target_metric TEXT NOT NULL DEFAULT 'contact_to_interest',
+                notes TEXT NOT NULL DEFAULT '',
+                observations TEXT NOT NULL DEFAULT '',
+                conclusion TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS experiment_campaigns (
+                experiment_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                PRIMARY KEY (experiment_id, campaign_id),
+                FOREIGN KEY(experiment_id) REFERENCES experiments(id),
+                FOREIGN KEY(campaign_id) REFERENCES campaigns(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_experiments_status ON experiments(status);
+            CREATE INDEX IF NOT EXISTS idx_experiment_campaigns_campaign
+                ON experiment_campaigns(campaign_id);
+            """
+        )
+        version = 6
         _set_version(conn, version)
     conn.commit()
     return version

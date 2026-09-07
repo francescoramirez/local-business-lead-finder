@@ -11,6 +11,7 @@ from leadfinder import __version__
 from leadfinder.config import SearchConfig, get_api_key, parse_locations
 from leadfinder.digital_presence import PresenceAnalyzer, format_presence_report
 from leadfinder.errors import ConfigError, GuiDependencyError, LeadFinderError
+from leadfinder.logging_setup import configure_logging
 from leadfinder.models import SearchPlan, SearchReport, utc_now_iso
 from leadfinder.places_client import PlacesClient
 from leadfinder.presets import list_presets
@@ -90,8 +91,33 @@ def main(
         is_eager=True,
         help="Show the version and exit.",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        help="Debug logging to the console and rotating log file. Secrets are redacted.",
+    ),
 ) -> None:
     """Local Business Lead Finder."""
+    if verbose:
+        configure_logging(verbose=True)
+
+
+def _resolve_campaign_id(campaign: str) -> int | None:
+    from leadfinder.application.service import LeadService
+
+    if not campaign.strip():
+        return None
+    service = LeadService()
+    matches = [
+        item
+        for item in service.campaigns()
+        if item.name.lower() == campaign.strip().lower()
+        or item.name.lower().startswith(campaign.strip().lower())
+    ]
+    if len(matches) != 1:
+        err_console.print("[red]Campaign not found or name is not unique.[/red]")
+        raise typer.Exit(code=1)
+    return matches[0].id
 
 
 def _build_config(
@@ -382,6 +408,183 @@ def stats_command() -> None:
     console.print(table)
 
 
+@app.command("analytics")
+def analytics_command(
+    days: Annotated[int, typer.Option("--days", help="Lookback window. 0 = all time.")] = 30,
+    campaign: Annotated[
+        str,
+        typer.Option("--campaign", help="Campaign name (exact or unique prefix)."),
+    ] = "",
+    output: OutputArg = None,
+) -> None:
+    """Show local campaign analytics. No network."""
+    from leadfinder.analytics import format_rate
+    from leadfinder.application.service import LeadService
+
+    service = LeadService()
+    campaign_id = _resolve_campaign_id(campaign)
+    window_days = None if days <= 0 else days
+    report = service.analytics_report(days=window_days, campaign_id=campaign_id)
+    if output is not None:
+        written = service.export_analytics(report, output)
+        console.print(f"Report saved to {written}")
+        return
+    console.print(f"LeadFinder Analytics - {report.period_label}")
+    console.print(f"Campaign: {report.campaign_name}")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    hist = report.historical
+    for label, value in [
+        ("Leads", str(hist.total_leads)),
+        ("Contacted", str(hist.contacted_once)),
+        ("Interested", str(hist.interested_once)),
+        ("Won", str(hist.won_once)),
+        ("Contact rate", format_rate(report.contact_rate)),
+        ("Contact->Interest", format_rate(report.contact_to_interest)),
+        ("Contact->Win", format_rate(report.contact_to_win)),
+        ("Interest->Win", format_rate(report.interest_to_win)),
+    ]:
+        table.add_row(label, value)
+    console.print(table)
+
+
+@app.command("insights")
+def insights_command(
+    days: Annotated[int, typer.Option("--days", help="Lookback window. 0 = all time.")] = 30,
+    campaign: Annotated[
+        str,
+        typer.Option("--campaign", help="Campaign name (exact or unique prefix)."),
+    ] = "",
+    output: OutputArg = None,
+) -> None:
+    """Show outcome-driven segment insights. No network."""
+    from leadfinder.analytics import format_rate
+    from leadfinder.application.service import LeadService
+    from leadfinder.insights import format_uplift
+
+    service = LeadService()
+    campaign_id = _resolve_campaign_id(campaign)
+    window_days = None if days <= 0 else days
+    report = service.insights_report(days=window_days, campaign_id=campaign_id)
+    if output is not None:
+        written = service.export_insights(report, output)
+        console.print(f"Report saved to {written}")
+        return
+    console.print(f"LeadFinder Insights - {report.period_label}")
+    console.print(f"Campaign: {report.campaign_name}")
+    console.print(
+        f"Overall contact->interest {format_rate(report.baseline)} "
+        f"n={report.baseline.denominator}"
+    )
+    if report.empty:
+        console.print(report.suggested_experiment)
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Segment")
+    table.add_column("Rate", justify="right")
+    table.add_column("vs baseline")
+    table.add_column("n", justify="right")
+    table.add_column("Confidence")
+    for row in report.ranked[:12]:
+        table.add_row(
+            row.label,
+            f"{row.rate}%",
+            format_uplift(row.uplift_pp),
+            str(row.n),
+            row.confidence,
+        )
+    console.print(table)
+    if report.strongest:
+        console.print(
+            f"Strongest observed: {report.strongest.label} "
+            f"{report.strongest.rate}% n={report.strongest.n}"
+        )
+    if report.weakest:
+        console.print(
+            f"Lower conversion: {report.weakest.label} "
+            f"{report.weakest.rate}% n={report.weakest.n}"
+        )
+    console.print(report.suggested_experiment)
+    console.print("Differences are percentage points. No causal claim.")
+
+
+@app.command("experiments")
+def experiments_command() -> None:
+    """List local prospecting experiments."""
+    from leadfinder.application.service import LeadService
+
+    service = LeadService()
+    rows = service.experiments()
+    if not rows:
+        console.print("No experiments yet. Create one from Insights in the GUI.")
+        return
+    table = Table(title="Experiments", show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Target")
+    for item in rows:
+        from leadfinder.experiments import target_label
+
+        table.add_row(str(item.id), item.name, item.status, target_label(item))
+    console.print(table)
+
+
+experiment_app = typer.Typer(help="Inspect a single experiment.")
+app.add_typer(experiment_app, name="experiment")
+
+
+@experiment_app.command("show")
+def experiment_show_command(experiment_id: int) -> None:
+    """Show one experiment vs the current baseline. No network."""
+    from leadfinder.analytics import format_rate
+    from leadfinder.application.service import LeadService
+
+    service = LeadService()
+    experiment = service.get_experiment(experiment_id)
+    if experiment is None:
+        err_console.print("[red]Experiment not found.[/red]")
+        raise typer.Exit(code=1)
+    metrics = service.experiment_metrics(experiment, days=0)
+    console.print(f"{experiment.name} [{experiment.status}]")
+    console.print(experiment.hypothesis or "(no hypothesis)")
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_row("Target", metrics.target_label)
+    table.add_row("Baseline", format_rate(metrics.baseline))
+    table.add_row("Observed", format_rate(metrics.observed))
+    table.add_row("Sample", str(metrics.sample))
+    table.add_row(
+        "Difference",
+        "n/a" if metrics.difference_pp is None else f"{metrics.difference_pp} pp",
+    )
+    table.add_row("Evaluation", metrics.evaluation)
+    console.print(table)
+    console.print("Descriptive comparison only. No causal claim.")
+
+
+@app.command("campaigns")
+def campaigns_command() -> None:
+    """List local campaigns."""
+    from leadfinder.application.service import LeadService
+
+    service = LeadService()
+    rows = service.campaigns()
+    if not rows:
+        console.print("No campaigns yet. Run a search or create one in the GUI.")
+        return
+    table = Table(title="Campaigns", show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Location")
+    table.add_column("Preset")
+    for item in rows:
+        table.add_row(str(item.id), item.name, item.location, item.business_preset)
+    console.print(table)
+
+
 @app.command("backup")
 def backup_command(
     output: Annotated[
@@ -391,15 +594,51 @@ def backup_command(
 ) -> None:
     """Copy the local SQLite workspace with the SQLite backup API."""
     from leadfinder.application.service import LeadService
-    from leadfinder.paths import data_dir
+    from leadfinder.paths import backup_filename, data_dir
 
     try:
-        destination = output or data_dir() / f"leadfinder-backup-{utc_now_iso()[:10]}.db"
+        destination = output or data_dir() / backup_filename()
         written = LeadService().backup(destination)
         console.print(f"Backup saved to {written}")
     except LeadFinderError as error:
         err_console.print(f"[red]{error}[/red]")
         raise typer.Exit(code=1) from error
+
+
+@app.command("restore")
+def restore_command(
+    path: Annotated[Path, typer.Argument(help="LeadFinder SQLite backup (.db).")],
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip confirmation. Still writes a safety backup first."),
+    ] = False,
+) -> None:
+    """Replace the local database from a backup after saving a safety copy."""
+    from leadfinder.application.service import LeadService
+
+    if not yes:
+        confirmed = typer.confirm(
+            "This replaces the current local database after saving a safety backup. Continue?"
+        )
+        if not confirmed:
+            raise typer.Abort()
+    try:
+        safety = LeadService().restore(path)
+        console.print(f"Restore complete. Previous database saved to {safety}")
+    except LeadFinderError as error:
+        err_console.print(f"[red]{error}[/red]")
+        raise typer.Exit(code=1) from error
+
+
+@app.command("doctor")
+def doctor_command() -> None:
+    """Check local database, schema, and configuration. Never prints keys."""
+    from leadfinder.doctor import format_doctor, run_doctor
+
+    report = run_doctor()
+    console.print(format_doctor(report))
+    if not report.ok():
+        raise typer.Exit(code=1)
 
 
 @app.command("gui")

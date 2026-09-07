@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QTextEdit,
@@ -99,6 +100,34 @@ class ActivityDialog(QDialog):
         layout.addWidget(box)
 
 
+class CampaignDialog(QDialog):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Campaign")
+        self.name = QLineEdit()
+        self.preset = QLineEdit()
+        self.location = QLineEdit()
+        self.region = QLineEdit()
+        self.country = QLineEdit()
+        self.country.setMaxLength(2)
+        self.notes = QTextEdit()
+        form = QFormLayout()
+        form.addRow("Name", self.name)
+        form.addRow("Business preset", self.preset)
+        form.addRow("Location", self.location)
+        form.addRow("Region", self.region)
+        form.addRow("Country", self.country)
+        form.addRow("Notes", self.notes)
+        box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(box)
+
+
 class TagDialog(QDialog):
     def __init__(self, current: str = "", parent=None) -> None:
         super().__init__(parent)
@@ -112,4 +141,47 @@ class TagDialog(QDialog):
         box.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addWidget(self.edit)
+        layout.addWidget(box)
+
+
+class ExperimentDialog(QDialog):
+    def __init__(
+        self,
+        parent=None,
+        *,
+        name: str = "",
+        hypothesis: str = "",
+        business_preset: str = "",
+        location: str = "",
+        digital_presence: str = "",
+        opportunity_level: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Create experiment")
+        self.name = QLineEdit(name)
+        self.hypothesis = QTextEdit()
+        self.hypothesis.setPlainText(hypothesis)
+        self.preset = QLineEdit(business_preset)
+        self.location = QLineEdit(location)
+        self.presence = QLineEdit(digital_presence)
+        self.opportunity = QLineEdit(opportunity_level)
+        form = QFormLayout()
+        form.addRow("Name", self.name)
+        form.addRow("Hypothesis", self.hypothesis)
+        form.addRow("Business preset", self.preset)
+        form.addRow("Location", self.location)
+        form.addRow("Digital presence", self.presence)
+        form.addRow("Opportunity", self.opportunity)
+        hint = QLabel(
+            "Review these criteria before searching. Creating an experiment does not run a search."
+        )
+        hint.setWordWrap(True)
+        box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        box.accepted.connect(self.accept)
+        box.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(hint)
+        layout.addLayout(form)
         layout.addWidget(box)

@@ -171,6 +171,12 @@ class LocalLeadState:
     opportunity_level: str = ""
     opportunity_score: int = 0
     has_phone: bool = False
+    business_preset: str = ""
+    source_location: str = ""
+    region: str = ""
+    country: str = ""
+    website_status: str = ""
+    campaign_id: int = 0
 
 
 @dataclass
@@ -194,6 +200,45 @@ class SearchRun:
     country: str
     lead_count: int
     high_opportunity_count: int
+    campaign_id: int = 0
+
+
+@dataclass
+class Campaign:
+    id: int
+    name: str
+    created_at: str
+    notes: str = ""
+    business_preset: str = ""
+    location: str = ""
+    region: str = ""
+    country: str = ""
+    auto_created: bool = False
+    local_day: str = ""
+
+
+EXPERIMENT_STATUSES = ("draft", "active", "completed", "archived")
+
+
+@dataclass
+class Experiment:
+    id: int
+    name: str
+    created_at: str
+    status: str = "draft"
+    hypothesis: str = ""
+    business_preset: str = ""
+    location: str = ""
+    digital_presence: str = ""
+    opportunity_level: str = ""
+    target_metric: str = "contact_to_interest"
+    notes: str = ""
+    observations: str = ""
+    conclusion: str = ""
+    campaign_ids: tuple[int, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
 
 
 @dataclass

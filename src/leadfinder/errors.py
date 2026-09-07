@@ -55,6 +55,18 @@ class BackupError(LeadFinderError):
     pass
 
 
+class RestoreError(LeadFinderError):
+    pass
+
+
+class WorkspaceError(LeadFinderError):
+    pass
+
+
+class DatabaseError(LeadFinderError):
+    pass
+
+
 class GuiDependencyError(LeadFinderError):
     pass
 

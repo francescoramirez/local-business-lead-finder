@@ -188,7 +188,7 @@ def test_malformed_json_and_missing_fields() -> None:
 
 
 def test_provider_config_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("leadfinder.ai.provider.load_dotenv", lambda **_kwargs: None)
+    monkeypatch.setattr("leadfinder.ai.provider.load_env_file", lambda: None)
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("GROQ_MODEL", raising=False)
     assert ai_configured() is False
@@ -370,3 +370,30 @@ def test_generate_sales_prep_uses_injected_provider() -> None:
     fake = _FakeProvider()
     generate_sales_prep(item, language="English", provider=fake)
     assert fake.calls == 1
+
+
+def test_groq_insights_uses_aggregates_only() -> None:
+    opener = _ok_opener(
+        {
+            "summary": "No-website segments converted higher.",
+            "observed": ["50% vs 35% baseline"],
+            "hypotheses": ["Missing websites may correlate with interest"],
+            "experiments": ["Run a focused no-website campaign"],
+            "cautions": ["Do not infer causality"],
+        }
+    )
+    provider = GroqProvider(
+        "test-key",
+        model="x",
+        opener=opener,
+        max_retries=0,
+    )
+    result = provider.generate_insights(
+        {"baseline_contact_to_interest": 35.0, "baseline_n": 40},
+        language="Spanish",
+    )
+    assert "higher" in result.summary.lower()
+    body = opener.calls[0].data.decode("utf-8")
+    assert "place_id" not in body
+    assert "test-key" not in body
+    assert "analytics_insights_v1" in body

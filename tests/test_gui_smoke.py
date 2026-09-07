@@ -141,7 +141,11 @@ def test_pipeline_dashboard_and_follow_up_flow(qapp, tmp_path: Path) -> None:
     store = LocalLeadStore(tmp_path / "leads.db")
     service = LeadService(store)
     window = MainWindow(service)
-    assert window.tabs.count() == 4
+    assert window.tabs.count() == 5
+    assert window.tabs.tabText(4) == "Learn"
+    assert window.learn_tabs.tabText(0) == "Analytics"
+    assert window.learn_tabs.tabText(1) == "Insights"
+    assert window.learn_tabs.tabText(2) == "Experiments"
     item = _managed(store, "ChIJ_SYNTHETIC_305", "Pipeline Cafe")
     window.model.set_leads([item])
     updated = window.service.set_status(item, "contacted")
@@ -269,4 +273,36 @@ def test_sales_prep_is_manual_copy_save_and_errors(qapp, tmp_path: Path) -> None
         assert "GROQ_API_KEY" not in key
         assert "gsk_" not in value.lower()
     restored.close()
+
+
+def test_analytics_tab_empty_and_populated(qapp, tmp_path: Path) -> None:
+    store = LocalLeadStore(tmp_path / "an.db")
+    service = LeadService(store)
+    window = MainWindow(service)
+    assert window.tabs.tabText(4) == "Learn"
+    window._refresh_analytics()
+    assert "Not enough history" in window.analytics_page.empty.text()
+    campaign = service.create_campaign(
+        name="Cafes Example", business_preset="cafe", location="Example"
+    )
+    item = _managed(store, "ChIJ_SYNTHETIC_601", "Cafe Example")
+    store.mark_seen(
+        item.lead.place_id,
+        business_preset="cafe",
+        source_location="Example",
+        website_status="social_only",
+        campaign_id=campaign.id,
+    )
+    store.attach_leads(campaign.id, [item.lead.place_id])
+    store.set_contact_status(item.lead.place_id, "contacted")
+    window.analytics_page.period.setCurrentIndex(window.analytics_page.period.findData(0))
+    window._refresh_campaigns()
+    window._refresh_analytics()
+    assert "Contacted" in window.analytics_page.headline.text()
+    assert window.campaign.findText("Auto (same-day search)") >= 0
+    window.insights_page.period.setCurrentIndex(window.insights_page.period.findData(0))
+    window._refresh_insights()
+    assert "contact" in window.insights_page.baseline.text().lower()
+    window.close()
+
 

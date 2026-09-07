@@ -8,14 +8,23 @@ from collections.abc import Callable
 from typing import Any
 
 from leadfinder.ai.models import (
+    INSIGHTS_PROMPT_VERSION,
     MAX_OUTPUT_TOKENS,
     REQUEST_TIMEOUT,
     TEMPERATURE,
+    InsightsExplanation,
     SalesPrepRequest,
     SalesPrepResult,
 )
-from leadfinder.ai.prompts import build_user_prompt, system_prompt
-from leadfinder.ai.provider import parse_sales_prep_json, require_ai_key
+from leadfinder.ai.prompts import (
+    build_experiment_user_prompt,
+    build_insights_user_prompt,
+    build_user_prompt,
+    experiment_system_prompt,
+    insights_system_prompt,
+    system_prompt,
+)
+from leadfinder.ai.provider import parse_insights_json, parse_sales_prep_json, require_ai_key
 from leadfinder.errors import (
     AIAuthError,
     AINetworkError,
@@ -51,6 +60,27 @@ class GroqProvider:
         self._opener = opener or urllib.request.urlopen
 
     def generate_sales_prep(self, request: SalesPrepRequest) -> SalesPrepResult:
+        content = self._complete_json(system_prompt(), build_user_prompt(request))
+        return parse_sales_prep_json(content, prompt_version=request.prompt_version)
+
+    def generate_insights(
+        self,
+        payload: dict[str, object],
+        *,
+        language: str,
+        prompt_version: str = INSIGHTS_PROMPT_VERSION,
+        experiment: bool = False,
+    ) -> InsightsExplanation:
+        if experiment:
+            system = experiment_system_prompt()
+            user = build_experiment_user_prompt(payload, language=language)
+        else:
+            system = insights_system_prompt()
+            user = build_insights_user_prompt(payload, language=language)
+        content = self._complete_json(system, user)
+        return parse_insights_json(content, prompt_version=prompt_version)
+
+    def _complete_json(self, system: str, user: str) -> str:
         body = json.dumps(
             {
                 "model": self.model,
@@ -58,8 +88,8 @@ class GroqProvider:
                 "max_tokens": MAX_OUTPUT_TOKENS,
                 "response_format": {"type": "json_object"},
                 "messages": [
-                    {"role": "system", "content": system_prompt()},
-                    {"role": "user", "content": build_user_prompt(request)},
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
                 ],
             }
         ).encode("utf-8")
@@ -67,8 +97,7 @@ class GroqProvider:
         for attempt in range(self.max_retries + 1):
             try:
                 raw = self._post(body)
-                content = _message_content(raw)
-                return parse_sales_prep_json(content, prompt_version=request.prompt_version)
+                return _message_content(raw)
             except (AIRateLimitError, AINetworkError, AITimeoutError) as error:
                 last_error = error
                 if attempt >= self.max_retries:
@@ -83,7 +112,7 @@ class GroqProvider:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
-            "User-Agent": "leadfinder/0.5.0 (sales-prep)",
+            "User-Agent": "leadfinder/1.0.0 (local)",
         }
         request = urllib.request.Request(GROQ_CHAT_URL, data=body, headers=headers, method="POST")
         try:

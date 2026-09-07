@@ -146,6 +146,12 @@ def load_env_file() -> None:
     load_dotenv(dotenv_path=Path(".env"), override=False)
 
 
+def places_key_configured() -> bool:
+    """True when a Places key is present. Does not return or log the value."""
+    load_env_file()
+    return any(os.getenv(name, "").strip() for name in API_KEY_ENV_VARS)
+
+
 def get_api_key() -> str:
     load_env_file()
     for name in API_KEY_ENV_VARS:

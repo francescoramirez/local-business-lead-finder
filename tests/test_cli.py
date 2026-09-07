@@ -17,6 +17,11 @@ def test_help_lists_main_commands() -> None:
     assert "analyze" in result.stdout
     assert "stats" in result.stdout
     assert "backup" in result.stdout
+    assert "analytics" in result.stdout
+    assert "campaigns" in result.stdout
+    assert "insights" in result.stdout
+    assert "experiments" in result.stdout
+    assert "doctor" in result.stdout
 
 
 def test_presets_lists_business_types() -> None:
@@ -74,3 +79,19 @@ def test_dry_run_cordoba_is_not_buenos_aires() -> None:
     assert result.exit_code == 0
     assert "Cordoba" in result.stdout
     assert "Buenos Aires" not in result.stdout
+
+
+def test_version_and_offline_commands() -> None:
+    from leadfinder import __version__
+
+    version = runner.invoke(app, ["--version"])
+    assert version.exit_code == 0
+    assert __version__ in version.stdout
+    insights = runner.invoke(app, ["insights", "--days", "90"])
+    assert insights.exit_code == 0
+    experiments = runner.invoke(app, ["experiments"])
+    assert experiments.exit_code == 0
+    doctor = runner.invoke(app, ["doctor"])
+    assert doctor.exit_code in {0, 1}
+    assert "LeadFinder Doctor" in doctor.stdout
+    assert "gsk_" not in doctor.stdout.lower()

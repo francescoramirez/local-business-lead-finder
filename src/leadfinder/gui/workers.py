@@ -23,12 +23,14 @@ class SearchWorker(QThread):
         config: SearchConfig,
         *,
         client_factory: Callable[[], PlacesClient] | None = None,
+        campaign_id: int | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._service = service
         self._config = config
         self._client_factory = client_factory
+        self._campaign_id = campaign_id
         self._cancel = False
 
     def request_cancel(self) -> None:
@@ -42,6 +44,7 @@ class SearchWorker(QThread):
                 client=client,
                 on_progress=self._on_progress,
                 is_cancelled=lambda: self._cancel,
+                campaign_id=self._campaign_id,
             )
             self.succeeded.emit(report, managed)
         except LeadFinderError as error:
@@ -118,6 +121,39 @@ class SalesPrepWorker(QThread):
                 self._item,
                 language=self._language,
                 model=self._model,
+            )
+            self.succeeded.emit(result)
+        except LeadFinderError as error:
+            self.failed.emit(friendly_error(error))
+        except Exception as error:  # noqa: BLE001
+            self.failed.emit(friendly_error(error))
+
+
+class InsightsWorker(QThread):
+    succeeded = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        service: LeadService,
+        payload_source: object,
+        *,
+        language: str,
+        experiment: bool = False,
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._service = service
+        self._source = payload_source
+        self._language = language
+        self._experiment = experiment
+
+    def run(self) -> None:
+        try:
+            result = self._service.explain_insights(
+                self._source,
+                language=self._language,
+                experiment=self._experiment,
             )
             self.succeeded.emit(result)
         except LeadFinderError as error:

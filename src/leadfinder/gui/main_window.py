@@ -33,13 +33,17 @@ from PySide6.QtWidgets import (
 
 from leadfinder.ai.models import DEFAULT_OUTPUT_LANGUAGE, SalesPrepResult
 from leadfinder.ai.provider import ai_configured, groq_model
+from leadfinder.analytics import compare_reports
 from leadfinder.application.service import LeadService, friendly_error
 from leadfinder.config import SearchConfig
 from leadfinder.errors import ConfigError, LeadFinderError, MissingApiKeyError
 from leadfinder.fields import FIELD_PROFILES
+from leadfinder.gui.analytics_page import AnalyticsPage, custom_bounds, export_report_dialog
 from leadfinder.gui.dashboard_page import DashboardPage
-from leadfinder.gui.dialogs import ActivityDialog, FollowUpDialog
+from leadfinder.gui.dialogs import ActivityDialog, CampaignDialog, ExperimentDialog, FollowUpDialog
+from leadfinder.gui.experiments_page import ExperimentsPage
 from leadfinder.gui.formatters import format_when
+from leadfinder.gui.insights_page import InsightsPage
 from leadfinder.gui.lead_model import (
     OPPORTUNITY_LABELS,
     WEBSITE_LABELS,
@@ -49,7 +53,8 @@ from leadfinder.gui.lead_model import (
 from leadfinder.gui.pipeline_page import PipelinePage
 from leadfinder.gui.prospects_page import ProspectsPage
 from leadfinder.gui.sales_prep import SalesPrepPanel
-from leadfinder.gui.workers import AnalyzeWorker, SalesPrepWorker, SearchWorker
+from leadfinder.gui.workers import AnalyzeWorker, InsightsWorker, SalesPrepWorker, SearchWorker
+from leadfinder.insights import SegmentInsight
 from leadfinder.models import (
     CONTACT_STATUS_LABELS,
     CONTACT_STATUSES,
@@ -66,11 +71,12 @@ class MainWindow(QMainWindow):
     def __init__(self, service: LeadService | None = None) -> None:
         super().__init__()
         self.setWindowTitle("LeadFinder")
-        self.resize(1280, 800)
+        self.resize(1280, 720)
         self.service = service or LeadService()
         self.settings = QSettings("LeadFinder", "LeadFinder")
         self._worker: SearchWorker | AnalyzeWorker | None = None
         self._prep_worker: SalesPrepWorker | None = None
+        self._insights_worker: InsightsWorker | None = None
         self._prep_cache: dict[str, SalesPrepResult] = {}
         self._selected: ManagedLead | None = None
         self._updating_details = False
@@ -94,7 +100,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         header = QLabel("LeadFinder")
         header.setObjectName("title")
-        subtitle = QLabel("Discover, rank, and track local business opportunities.")
+        subtitle = QLabel("Discover → Qualify → Track → Analyze → Improve")
         subtitle.setObjectName("hint")
 
         self.preset = QComboBox()
@@ -131,17 +137,38 @@ class MainWindow(QMainWindow):
         self.analyze_now_btn = QPushButton("Analyze websites")
         self.export_pipeline_btn = QPushButton("Export pipeline")
 
-        form = QFormLayout()
-        form.addRow("Business", self.preset)
-        form.addRow("Location", self.location)
-        form.addRow("Region", self.region)
-        form.addRow("Country", self.country)
-        form.addRow("Coverage", self.coverage)
-        form.addRow("Fields", self.fields)
-        form.addRow("Max requests", self.max_requests)
-        form.addRow("Pages", self.pages)
-        form.addRow(self.analyze)
-        form.addRow(self.only_no_website)
+        target_form = QFormLayout()
+        target_form.addRow("Business", self.preset)
+        target_form.addRow("Location", self.location)
+        target_form.addRow("Region", self.region)
+        target_form.addRow("Country", self.country)
+        self.campaign = QComboBox()
+        self.new_campaign_btn = QPushButton("New Campaign")
+        campaign_row = QHBoxLayout()
+        campaign_row.addWidget(self.campaign, 1)
+        campaign_row.addWidget(self.new_campaign_btn)
+        target_form.addRow("Campaign", campaign_row)
+        target_box = QGroupBox("Target")
+        target_box.setLayout(target_form)
+
+        cost_form = QFormLayout()
+        cost_form.addRow("Coverage", self.coverage)
+        cost_form.addRow("Fields", self.fields)
+        cost_form.addRow("Max requests", self.max_requests)
+        cost_form.addRow("Pages", self.pages)
+        self.cost_preview = QLabel("Dry Run to preview request volume.")
+        self.cost_preview.setObjectName("hint")
+        self.cost_preview.setWordWrap(True)
+        cost_form.addRow(self.cost_preview)
+        cost_box = QGroupBox("Cost and volume")
+        cost_box.setLayout(cost_form)
+
+        filter_form = QFormLayout()
+        filter_form.addRow(self.analyze)
+        filter_form.addRow(self.only_no_website)
+        filter_box = QGroupBox("Qualification")
+        filter_box.setLayout(filter_form)
+
         buttons = QGridLayout()
         buttons.addWidget(self.dry_run_btn, 0, 0)
         buttons.addWidget(self.search_btn, 0, 1)
@@ -153,7 +180,9 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self.export_pipeline_btn, 3, 1)
         search_box = QGroupBox("Search")
         search_layout = QVBoxLayout(search_box)
-        search_layout.addLayout(form)
+        search_layout.addWidget(target_box)
+        search_layout.addWidget(cost_box)
+        search_layout.addWidget(filter_box)
         search_layout.addLayout(buttons)
         search_layout.addStretch()
 
@@ -245,7 +274,9 @@ class MainWindow(QMainWindow):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        table_header = self.table.horizontalHeader()
+        table_header.setStretchLastSection(True)
+        table_header.setSectionsMovable(True)
         self.table.setColumnWidth(1, 180)
         self.empty = QLabel(
             "No leads yet.\n\nConfigure a business search and run Dry Run or Search."
@@ -347,11 +378,19 @@ class MainWindow(QMainWindow):
         self.pipeline_page = PipelinePage()
         self.prospects_page = ProspectsPage()
         self.dashboard_page = DashboardPage()
+        self.analytics_page = AnalyticsPage()
+        self.insights_page = InsightsPage()
+        self.experiments_page = ExperimentsPage()
+        self.learn_tabs = QTabWidget()
+        self.learn_tabs.addTab(self.analytics_page, "Analytics")
+        self.learn_tabs.addTab(self.insights_page, "Insights")
+        self.learn_tabs.addTab(self.experiments_page, "Experiments")
         self.tabs = QTabWidget()
         self.tabs.addTab(split, "Search")
         self.tabs.addTab(self.pipeline_page, "Pipeline")
         self.tabs.addTab(self.prospects_page, "Prospects")
         self.tabs.addTab(self.dashboard_page, "Dashboard")
+        self.tabs.addTab(self.learn_tabs, "Learn")
 
         root = QWidget()
         layout = QVBoxLayout(root)
@@ -374,12 +413,25 @@ class MainWindow(QMainWindow):
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(lambda: self.export_leads("csv"))
         self.addAction(export_action)
-        backup_action = QAction("Backup local data", self)
+        backup_action = QAction("Backup data", self)
         backup_action.triggered.connect(self.backup_db)
         self.addAction(backup_action)
+        restore_action = QAction("Restore data", self)
+        restore_action.triggered.connect(self.restore_db)
+        export_ws_action = QAction("Export local workspace", self)
+        export_ws_action.triggered.connect(self.export_workspace)
+        import_ws_action = QAction("Import workspace (merge)", self)
+        import_ws_action.triggered.connect(self.import_workspace)
+        doctor_action = QAction("Doctor", self)
+        doctor_action.triggered.connect(self.show_doctor)
         file_menu = self.menuBar().addMenu("File")
         file_menu.addAction(export_action)
         file_menu.addAction(backup_action)
+        file_menu.addAction(restore_action)
+        file_menu.addAction(export_ws_action)
+        file_menu.addAction(import_ws_action)
+        file_menu.addSeparator()
+        file_menu.addAction(doctor_action)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _connect(self) -> None:
@@ -419,12 +471,32 @@ class MainWindow(QMainWindow):
         self.pipeline_page.status_dropped.connect(self._on_pipeline_drop)
         self.pipeline_page.card_selected.connect(self._select_place)
         self.prospects_page.selected.connect(self._select_place)
+        self.new_campaign_btn.clicked.connect(self.create_campaign)
+        self.analytics_page.refresh_btn.clicked.connect(self._refresh_analytics)
+        self.analytics_page.export_btn.clicked.connect(self.export_analytics)
+        self.analytics_page.period.currentIndexChanged.connect(self._refresh_analytics)
+        self.analytics_page.campaign.currentIndexChanged.connect(self._refresh_analytics)
         self.sales_prep.generate_btn.clicked.connect(self.start_sales_prep)
         self.sales_prep.regenerate_btn.clicked.connect(self.start_sales_prep)
         self.sales_prep.copy_opener_btn.clicked.connect(self._copy_opener)
         self.sales_prep.copy_points_btn.clicked.connect(self._copy_talking_points)
         self.sales_prep.copy_full_btn.clicked.connect(self._copy_full_prep)
         self.sales_prep.save_notes_btn.clicked.connect(self._save_sales_prep_notes)
+        self.insights_page.refresh_btn.clicked.connect(self._refresh_insights)
+        self.insights_page.export_btn.clicked.connect(self.export_insights)
+        self.insights_page.explain_requested.connect(self.explain_insights)
+        self.insights_page.create_experiment_requested.connect(self.create_experiment_from_insight)
+        self.insights_page.period.currentIndexChanged.connect(self._refresh_insights)
+        self.insights_page.campaign.currentIndexChanged.connect(self._refresh_insights)
+        self.experiments_page.refresh_requested.connect(self._refresh_experiments)
+        self.experiments_page.save_notes_requested.connect(self._save_experiment)
+        self.experiments_page.summarize_requested.connect(self.summarize_experiment)
+        self.preset.currentIndexChanged.connect(self._update_cost_preview)
+        self.coverage.currentIndexChanged.connect(self._update_cost_preview)
+        self.fields.currentIndexChanged.connect(self._update_cost_preview)
+        self.pages.valueChanged.connect(self._update_cost_preview)
+        self.max_requests.valueChanged.connect(self._update_cost_preview)
+        self.location.editingFinished.connect(self._update_cost_preview)
 
     def _refresh_ai_status(self) -> None:
         model = groq_model(self.sales_prep.model_value())
@@ -504,7 +576,12 @@ class MainWindow(QMainWindow):
         self._set_busy(True)
         self.progress.setRange(0, 0)
         self.progress_label.setText("Searching…")
-        self._worker = SearchWorker(self.service, self.current_config(), parent=self)
+        self._worker = SearchWorker(
+            self.service,
+            self.current_config(),
+            campaign_id=self._selected_campaign_id(),
+            parent=self,
+        )
         self._worker.progressed.connect(self._on_progress)
         self._worker.succeeded.connect(self._on_search_done)
         self._worker.failed.connect(self._on_search_failed)
@@ -838,6 +915,219 @@ class MainWindow(QMainWindow):
             self.service.conversion_summary(),
             self.service.search_history(),
         )
+        self._refresh_campaigns()
+        self._refresh_analytics()
+        self._refresh_insights()
+        self._refresh_experiments()
+
+    def _refresh_campaigns(self) -> None:
+        campaigns = self.service.campaigns()
+        current = self.campaign.currentData()
+        self.campaign.blockSignals(True)
+        self.campaign.clear()
+        self.campaign.addItem("Auto (same-day search)", 0)
+        for campaign in campaigns:
+            self.campaign.addItem(campaign.name, campaign.id)
+        index = self.campaign.findData(current)
+        self.campaign.setCurrentIndex(max(index, 0))
+        self.campaign.blockSignals(False)
+        self.analytics_page.fill_campaigns(campaigns)
+        self.insights_page.fill_campaigns(campaigns)
+
+    def _selected_campaign_id(self) -> int | None:
+        value = self.campaign.currentData()
+        if not value:
+            return None
+        return int(value)
+
+    def create_campaign(self) -> None:
+        dialog = CampaignDialog(self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        name = dialog.name.text().strip()
+        if not name:
+            return
+        created = self.service.create_campaign(
+            name=name,
+            business_preset=dialog.preset.text().strip(),
+            location=dialog.location.text().strip(),
+            region=dialog.region.text().strip(),
+            country=dialog.country.text().strip().upper(),
+            notes=dialog.notes.toPlainText(),
+        )
+        self._refresh_campaigns()
+        index = self.campaign.findData(created.id)
+        if index >= 0:
+            self.campaign.setCurrentIndex(index)
+
+    def _analytics_period(self):
+        choice = int(self.analytics_page.period.currentData() or 30)
+        if choice == -1:
+            start, end = custom_bounds(self.analytics_page)
+            return self.service.analytics_period(days=None, start=start, end=end)
+        if choice == 0:
+            return self.service.analytics_period(days=None)
+        return self.service.analytics_period(days=choice)
+
+    def _refresh_analytics(self) -> None:
+        period = self._analytics_period()
+        campaign_id = self.analytics_page.selected_campaign_id()
+        report = self.service.analytics_report(period, campaign_id=campaign_id)
+        comparison = ""
+        left_id = self.analytics_page.compare_a.currentData()
+        right_id = self.analytics_page.compare_b.currentData()
+        if left_id and right_id and left_id != right_id:
+            left = self.service.analytics_report(period, campaign_id=int(left_id))
+            right = self.service.analytics_report(period, campaign_id=int(right_id))
+            lines = [f"{left.campaign_name}  vs  {right.campaign_name}", "Metric | A | B"]
+            for metric, a_val, b_val in compare_reports(left, right):
+                lines.append(f"{metric} | {a_val} | {b_val}")
+            comparison = "\n".join(lines)
+        self.analytics_page.show_report(report, comparison)
+
+    def _insights_period(self):
+        choice = int(self.insights_page.period.currentData() or 30)
+        if choice == 0:
+            return self.service.analytics_period(days=None)
+        return self.service.analytics_period(days=choice)
+
+    def _refresh_insights(self) -> None:
+        period = self._insights_period()
+        campaign_id = self.insights_page.selected_campaign_id()
+        report = self.service.insights_report(period, campaign_id=campaign_id)
+        self.insights_page.show_report(report)
+
+    def export_insights(self) -> None:
+        period = self._insights_period()
+        report = self.service.insights_report(
+            period, campaign_id=self.insights_page.selected_campaign_id()
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export insights",
+            str(Path.home() / "insights.md"),
+            "Markdown (*.md);;JSON (*.json)",
+        )
+        if not path:
+            return
+        written = self.service.export_insights(report, Path(path))
+        QMessageBox.information(self, "Export", f"Saved insights to:\n{written}")
+
+    def explain_insights(self) -> None:
+        period = self._insights_period()
+        report = self.service.insights_report(
+            period, campaign_id=self.insights_page.selected_campaign_id()
+        )
+        self._start_insights_worker(report, experiment=False)
+
+    def _start_insights_worker(self, source: object, *, experiment: bool) -> None:
+        if self._insights_worker and self._insights_worker.isRunning():
+            return
+        language = self.sales_prep.language_value()
+        self._insights_worker = InsightsWorker(
+            self.service, source, language=language, experiment=experiment
+        )
+        self._insights_worker.succeeded.connect(self._on_insights_ready)
+        self._insights_worker.failed.connect(self._on_insights_failed)
+        self._insights_worker.start()
+        self.statusBar().showMessage("Explaining aggregated metrics...")
+
+    def _on_insights_ready(self, result) -> None:
+        observed = "\n".join(f"- {item}" for item in result.observed)
+        hypotheses = "\n".join(f"- {item}" for item in result.hypotheses)
+        experiments = "\n".join(f"- {item}" for item in result.experiments)
+        cautions = "\n".join(f"- {item}" for item in result.cautions)
+        text = (
+            f"{result.summary}\n\nObserved\n{observed}\n\n"
+            f"Hypothesis\n{hypotheses}\n\nExperiments\n{experiments}\n\n"
+            f"Cautions\n{cautions}"
+        )
+        self.insights_page.show_explanation(text)
+        self.statusBar().showMessage("AI explanation ready (aggregated metrics only).")
+
+    def _on_insights_failed(self, message: str) -> None:
+        self.insights_page.show_explanation(message)
+        QMessageBox.warning(self, "AI", message)
+
+    def create_experiment_from_insight(self, insight: SegmentInsight) -> None:
+        from leadfinder.workspace import criteria_from_insight
+
+        criteria = criteria_from_insight(insight.dimension, insight.key)
+        dialog = ExperimentDialog(
+            self,
+            name=f"Try {insight.label}",
+            hypothesis=(
+                f"Businesses matching {insight.label} may show different "
+                "contact->interest than the overall baseline."
+            ),
+            business_preset=criteria.get("business_preset", ""),
+            location=criteria.get("location", ""),
+            digital_presence=criteria.get("digital_presence", ""),
+            opportunity_level=criteria.get("opportunity_level", ""),
+        )
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        name = dialog.name.text().strip()
+        if not name:
+            return
+        self.service.create_experiment(
+            name=name,
+            hypothesis=dialog.hypothesis.toPlainText().strip(),
+            business_preset=dialog.preset.text().strip(),
+            location=dialog.location.text().strip(),
+            digital_presence=dialog.presence.text().strip(),
+            opportunity_level=dialog.opportunity.text().strip(),
+            campaign_ids=(
+                [cid] if (cid := self.insights_page.selected_campaign_id()) else None
+            ),
+        )
+        self.learn_tabs.setCurrentWidget(self.experiments_page)
+        self._refresh_experiments()
+        QMessageBox.information(
+            self,
+            "Experiment",
+            "Experiment saved as a draft. Review it, then run a search yourself. "
+            "LeadFinder did not start a search.",
+        )
+
+    def _refresh_experiments(self) -> None:
+        experiments = self.service.experiments()
+        metrics = [
+            self.service.experiment_metrics(item, days=0) for item in experiments
+        ]
+        self.experiments_page.show_experiments(experiments, metrics)
+
+    def _save_experiment(self, experiment) -> None:
+        self.service.update_experiment(
+            experiment.id,
+            status=experiment.status,
+            observations=experiment.observations,
+            notes=experiment.notes,
+            conclusion=experiment.conclusion,
+        )
+        self._refresh_experiments()
+        self.statusBar().showMessage("Experiment notes saved.")
+
+    def summarize_experiment(self, metrics) -> None:
+        self._start_insights_worker(metrics, experiment=True)
+
+    def _update_cost_preview(self) -> None:
+        try:
+            plan = self.service.dry_run(self.current_config())
+        except LeadFinderError as error:
+            self.cost_preview.setText(str(error))
+            return
+        self.cost_preview.setText(
+            f"{plan.billing_tier}: up to {plan.max_api_requests} API requests "
+            f"({plan.max_queries} queries x {plan.pages} page(s)). Dry Run for the full plan."
+        )
+
+    def export_analytics(self) -> None:
+        period = self._analytics_period()
+        report = self.service.analytics_report(
+            period, campaign_id=self.analytics_page.selected_campaign_id()
+        )
+        export_report_dialog(self, self.service, report)
 
     def _select_place(self, place_id: str) -> None:
         for item in self.model.leads():
@@ -889,8 +1179,10 @@ class MainWindow(QMainWindow):
         )
 
     def backup_db(self) -> None:
-        suggested = str(Path.home() / "leadfinder-backup.db")
-        path, _ = QFileDialog.getSaveFileName(self, "Backup local data", suggested, "*.db")
+        from leadfinder.paths import backup_filename
+
+        suggested = str(Path.home() / backup_filename())
+        path, _ = QFileDialog.getSaveFileName(self, "Backup data", suggested, "*.db")
         if not path:
             return
         try:
@@ -899,6 +1191,88 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Backup", friendly_error(error))
             return
         QMessageBox.information(self, "Backup", f"Saved local database to:\n{written}")
+
+    def restore_db(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Restore data", str(Path.home()), "*.db")
+        if not path:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Restore data",
+            "This replaces the current local database after saving a safety backup.\n\nContinue?",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            safety = self.service.restore(Path(path))
+        except LeadFinderError as error:
+            QMessageBox.warning(self, "Restore", friendly_error(error))
+            return
+        QMessageBox.information(
+            self,
+            "Restore",
+            f"Restore complete.\nPrevious database saved to:\n{safety}",
+        )
+        self._refresh_secondary()
+
+    def export_workspace(self) -> None:
+        suggested = str(Path.home() / "leadfinder-workspace.zip")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export local workspace", suggested, "*.zip"
+        )
+        if not path:
+            return
+        settings = {
+            "location": self.location.text(),
+            "region": self.region.text(),
+            "country": self.country.text(),
+            "preset": self.preset.currentData(),
+            "coverage": self.coverage.currentText(),
+            "fields": self.fields.currentText(),
+        }
+        try:
+            written = self.service.export_workspace(Path(path), settings=settings)
+        except LeadFinderError as error:
+            QMessageBox.warning(self, "Export", friendly_error(error))
+            return
+        QMessageBox.information(self, "Export", f"Workspace saved to:\n{written}")
+
+    def import_workspace(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import workspace", str(Path.home()), "*.zip"
+        )
+        if not path:
+            return
+        confirm = QMessageBox.question(
+            self,
+            "Import workspace",
+            "Merge this workspace into the current database by Place ID?\n"
+            "Existing leads are kept. New records are added.",
+        )
+        if confirm != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            added = self.service.import_workspace(Path(path))
+        except LeadFinderError as error:
+            QMessageBox.warning(self, "Import", friendly_error(error))
+            return
+        self._refresh_secondary()
+        QMessageBox.information(
+            self,
+            "Import",
+            "Merged workspace.\n"
+            f"Leads added: {added.get('leads', 0)}\n"
+            f"Leads skipped: {added.get('skipped_leads', 0)}\n"
+            f"Campaigns: {added.get('campaigns', 0)}\n"
+            f"Activities: {added.get('activities', 0)}\n"
+            f"Experiments: {added.get('experiments', 0)}",
+        )
+
+    def show_doctor(self) -> None:
+        from leadfinder.doctor import format_doctor
+
+        report = self.service.doctor()
+        QMessageBox.information(self, "LeadFinder Doctor", format_doctor(report))
 
     def export_leads(self, fmt: str) -> None:
         if self.export_visible.isChecked():
@@ -942,7 +1316,14 @@ class MainWindow(QMainWindow):
         if lang_index >= 0:
             self.sales_prep.language.setCurrentIndex(lang_index)
         self.sales_prep.model.setText(str(self.settings.value("ai_model", "")))
+        header_state = self.settings.value("table_header")
+        if header_state:
+            try:
+                self.table.horizontalHeader().restoreState(header_state)
+            except Exception:
+                pass
         self._refresh_ai_status()
+        self._update_cost_preview()
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_notes()
@@ -955,6 +1336,7 @@ class MainWindow(QMainWindow):
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("ai_output_language", self.sales_prep.language_value())
         self.settings.setValue("ai_model", self.sales_prep.model_value())
+        self.settings.setValue("table_header", self.table.horizontalHeader().saveState())
         if self._prep_worker and self._prep_worker.isRunning():
             self._prep_worker.wait(2000)
         if self._worker and self._worker.isRunning():

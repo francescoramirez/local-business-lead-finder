@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from platformdirs import user_data_dir, user_log_dir
@@ -26,3 +27,8 @@ def default_db_path() -> Path:
 
 def default_log_path() -> Path:
     return log_dir() / "leadfinder.log"
+
+
+def backup_filename(stamp: datetime | None = None) -> str:
+    current = stamp or datetime.now()
+    return current.strftime("leadfinder-backup-%Y%m%d-%H%M%S.db")

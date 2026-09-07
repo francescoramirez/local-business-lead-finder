@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
-from leadfinder.ai.models import SalesPrepResult
+from leadfinder.ai.models import InsightsExplanation, SalesPrepResult
 from leadfinder.ai.provider import AIProvider
-from leadfinder.ai.service import generate_sales_prep
+from leadfinder.ai.service import generate_insights_explanation, generate_sales_prep
+from leadfinder.analytics import (
+    AnalyticsReport,
+    Period,
+    auto_campaign_name,
+    build_report,
+    filter_leads,
+    local_timezone,
+    period_all_time,
+    period_custom,
+    period_last_days,
+)
 from leadfinder.config import SearchConfig, get_api_key
 from leadfinder.digital_presence import PresenceAnalyzer, analyze_leads
 from leadfinder.errors import (
@@ -17,6 +29,7 @@ from leadfinder.errors import (
     AIResponseValidationError,
     AITimeoutError,
     ConfigError,
+    DatabaseError,
     LeadFinderError,
     MissingApiKeyError,
     PlacesAuthError,
@@ -24,10 +37,14 @@ from leadfinder.errors import (
     PlacesInvalidRequestError,
     PlacesRateLimitError,
     PlacesServerError,
+    RestoreError,
+    WorkspaceError,
 )
 from leadfinder.exporters import export_leads
 from leadfinder.models import (
     Activity,
+    Campaign,
+    Experiment,
     Lead,
     LocalLeadState,
     ManagedLead,
@@ -88,11 +105,17 @@ def friendly_error(error: Exception) -> str:
         return "Google Places is temporarily unavailable. Try again in a moment."
     if isinstance(error, PlacesClientError):
         return "Could not reach Google Places. Check the network connection and try again."
+    if isinstance(error, DatabaseError):
+        return str(error)
+    if isinstance(error, RestoreError):
+        return str(error)
+    if isinstance(error, WorkspaceError):
+        return str(error)
     if isinstance(error, ConfigError):
         return str(error)
     if isinstance(error, LeadFinderError):
         return str(error)
-    return "Something went wrong while running the search."
+    return "Something went wrong. Details were written to the local log."
 
 
 def apply_state(item: ManagedLead, state: LocalLeadState) -> ManagedLead:
@@ -122,6 +145,11 @@ def merge_local_state(leads: list[Lead], store: LocalLeadStore) -> list[ManagedL
                 opportunity_level=lead.opportunity_level,
                 opportunity_score=lead.opportunity_score,
                 has_phone=lead.contactable,
+                business_preset=lead.business_preset,
+                source_location=lead.source_location,
+                region=lead.region,
+                country=lead.country,
+                website_status=lead.website_status,
             )
             if lead.place_id
             else None
@@ -231,6 +259,7 @@ class LeadService:
         client: PlacesClient | None = None,
         on_progress: Callable[[SearchProgress], None] | None = None,
         is_cancelled: Callable[[], bool] | None = None,
+        campaign_id: int | None = None,
         sleeper: Callable[[float], None] | None = None,
     ) -> tuple[SearchReport, list[ManagedLead]]:
         api_client = client or PlacesClient(self.require_api_key())
@@ -243,6 +272,14 @@ class LeadService:
         )
         managed = merge_local_state(report.leads, self.store)
         location = config.locations[0] if config.locations else ""
+        campaign = self.resolve_campaign(
+            campaign_id,
+            business_preset=config.business,
+            location=location,
+            region=config.region,
+            country=config.country,
+        )
+        self.store.attach_leads(campaign.id, [item.lead.place_id for item in managed])
         self.store.record_search(
             business_preset=config.business,
             location=location,
@@ -252,6 +289,7 @@ class LeadService:
             high_opportunity_count=sum(
                 1 for item in managed if item.lead.opportunity_level == "high"
             ),
+            campaign_id=campaign.id,
         )
         return report, managed
 
@@ -272,6 +310,19 @@ class LeadService:
         )
         for item in items:
             score_lead(item.lead)
+            if item.lead.place_id:
+                self.store.mark_seen(
+                    item.lead.place_id,
+                    label=item.lead.name,
+                    opportunity_level=item.lead.opportunity_level,
+                    opportunity_score=item.lead.opportunity_score,
+                    has_phone=item.lead.contactable,
+                    business_preset=item.lead.business_preset,
+                    source_location=item.lead.source_location,
+                    region=item.lead.region,
+                    country=item.lead.country,
+                    website_status=item.lead.website_status,
+                )
         return items
 
     def prepare_sales(
@@ -358,6 +409,242 @@ class LeadService:
             "contacted_to_interested": contacted_to_interested_rate(counts),
             "interested_to_won": interested_to_won_rate(counts),
         }
+
+    def resolve_campaign(
+        self,
+        campaign_id: int | None,
+        *,
+        business_preset: str,
+        location: str,
+        region: str,
+        country: str,
+        now: datetime | None = None,
+    ) -> Campaign:
+        if campaign_id:
+            found = self.store.get_campaign(campaign_id)
+            if found is not None:
+                return found
+        stamp = now or datetime.now().astimezone()
+        local_day = stamp.date().isoformat()
+        existing = self.store.find_auto_campaign(
+            business_preset=business_preset,
+            location=location,
+            region=region,
+            country=country,
+            local_day=local_day,
+        )
+        if existing is not None:
+            return existing
+        return self.store.create_campaign(
+            name=auto_campaign_name(business_preset, location, local_day),
+            business_preset=business_preset,
+            location=location,
+            region=region,
+            country=country,
+            auto_created=True,
+            local_day=local_day,
+        )
+
+    def create_campaign(
+        self,
+        *,
+        name: str,
+        business_preset: str = "",
+        location: str = "",
+        region: str = "",
+        country: str = "",
+        notes: str = "",
+    ) -> Campaign:
+        return self.store.create_campaign(
+            name=name,
+            business_preset=business_preset,
+            location=location,
+            region=region,
+            country=country,
+            notes=notes,
+            auto_created=False,
+        )
+
+    def campaigns(self) -> list[Campaign]:
+        return self.store.list_campaigns()
+
+    def analytics_period(
+        self,
+        *,
+        days: int | None = 30,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> Period:
+        if start is not None and end is not None:
+            return period_custom(start, end)
+        if days is None or days <= 0:
+            return period_all_time()
+        return period_last_days(days)
+
+    def analytics_report(
+        self,
+        period: Period | None = None,
+        *,
+        campaign_id: int | None = None,
+        days: int | None = 30,
+        now: datetime | None = None,
+    ) -> AnalyticsReport:
+        window = period or self.analytics_period(days=days)
+        campaign_name = "All campaigns"
+        notes = ""
+        if campaign_id:
+            campaign = self.store.get_campaign(campaign_id)
+            if campaign is not None:
+                campaign_name = campaign.name
+                notes = campaign.notes
+        return build_report(
+            self.store.load_lead_facts(),
+            window,
+            campaign_id=campaign_id,
+            campaign_name=campaign_name,
+            campaign_notes=notes,
+            now=now,
+            tz=local_timezone(),
+        )
+
+    def export_analytics(self, report: AnalyticsReport, output: Path) -> Path:
+        from leadfinder.exporters import (
+            write_analytics_csv,
+            write_analytics_json,
+            write_analytics_markdown,
+        )
+
+        suffix = output.suffix.lower()
+        if suffix == ".json":
+            return write_analytics_json(report, output, force=True)
+        if suffix == ".md":
+            return write_analytics_markdown(report, output, force=True)
+        return write_analytics_csv(report, output, force=True)
+
+    def insights_report(
+        self,
+        period: Period | None = None,
+        *,
+        campaign_id: int | None = None,
+        days: int | None = 30,
+        now: datetime | None = None,
+    ):
+        from leadfinder.insights import InsightsReport, build_insights
+
+        window = period or self.analytics_period(days=days)
+        report = self.analytics_report(
+            window, campaign_id=campaign_id, days=days, now=now
+        )
+        scoped = filter_leads(
+            self.store.load_lead_facts(),
+            window,
+            campaign_id=campaign_id,
+        )
+        insights: InsightsReport = build_insights(scoped, report)
+        return insights
+
+    def export_insights(self, report, output: Path) -> Path:
+        from leadfinder.exporters import write_insights_json, write_insights_markdown
+
+        suffix = output.suffix.lower()
+        if suffix == ".md":
+            return write_insights_markdown(report, output, force=True)
+        return write_insights_json(report, output, force=True)
+
+    def explain_insights(
+        self,
+        report,
+        *,
+        language: str = "Spanish",
+        model: str = "",
+        experiment: bool = False,
+    ) -> InsightsExplanation:
+        payload = report.to_ai_payload()
+        return generate_insights_explanation(
+            payload,
+            language=language,
+            model=model,
+            provider=self.ai_provider,
+            experiment=experiment,
+        )
+
+    def create_experiment(
+        self,
+        *,
+        name: str,
+        hypothesis: str = "",
+        business_preset: str = "",
+        location: str = "",
+        digital_presence: str = "",
+        opportunity_level: str = "",
+        notes: str = "",
+        campaign_ids: list[int] | None = None,
+    ) -> Experiment:
+        experiment = self.store.create_experiment(
+            name=name,
+            hypothesis=hypothesis,
+            business_preset=business_preset,
+            location=location,
+            digital_presence=digital_presence,
+            opportunity_level=opportunity_level,
+            notes=notes,
+            status="draft",
+        )
+        if campaign_ids:
+            self.store.attach_campaigns(experiment.id, campaign_ids)
+            found = self.store.get_experiment(experiment.id)
+            return found if found is not None else experiment
+        return experiment
+
+    def experiments(self) -> list[Experiment]:
+        return self.store.list_experiments()
+
+    def get_experiment(self, experiment_id: int) -> Experiment | None:
+        return self.store.get_experiment(experiment_id)
+
+    def update_experiment(self, experiment_id: int, **fields: str) -> Experiment:
+        return self.store.update_experiment(experiment_id, **fields)
+
+    def experiment_metrics(
+        self,
+        experiment: Experiment,
+        *,
+        days: int | None = 0,
+        now: datetime | None = None,
+    ):
+        from leadfinder.experiments import evaluate_experiment
+
+        window = self.analytics_period(days=days)
+        report = self.analytics_report(window, now=now)
+        campaign_ids = frozenset(experiment.campaign_ids)
+        scoped = filter_leads(self.store.load_lead_facts(), window)
+        return evaluate_experiment(
+            experiment,
+            scoped,
+            report.contact_to_interest,
+            period_label=report.period_label,
+            campaign_ids=campaign_ids,
+        )
+
+    def restore(self, source: Path) -> Path:
+        return self.store.restore(source)
+
+    def export_workspace(
+        self, destination: Path, *, settings: dict[str, object] | None = None
+    ) -> Path:
+        from leadfinder.workspace import export_workspace
+
+        return export_workspace(self.store, destination, settings=settings)
+
+    def import_workspace(self, source: Path) -> dict[str, int]:
+        from leadfinder.workspace import import_workspace
+
+        return import_workspace(self.store, source)
+
+    def doctor(self):
+        from leadfinder.doctor import run_doctor
+
+        return run_doctor(self.store.path)
 
     def backup(self, destination: Path) -> Path:
         return self.store.backup(destination)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
-from leadfinder.errors import GuiDependencyError
+from leadfinder.errors import DatabaseError, GuiDependencyError
 
 
 def run_gui() -> int:
@@ -32,6 +32,12 @@ def run_gui() -> int:
     app.setOrganizationName("LeadFinder")
     app.setStyle("Fusion")
     app.setStyleSheet(LIGHT_QSS)
-    window = MainWindow()
+    try:
+        window = MainWindow()
+    except DatabaseError as error:
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.critical(None, "LeadFinder", str(error))
+        return 1
     window.show()
     return app.exec()

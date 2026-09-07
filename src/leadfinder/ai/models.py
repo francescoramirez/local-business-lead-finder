@@ -96,3 +96,27 @@ REQUIRED_RESULT_FIELDS = (
     "cautions",
     "next_step",
 )
+
+INSIGHTS_PROMPT_VERSION = "analytics_insights_v1"
+EXPERIMENT_PROMPT_VERSION = "experiment_summary_v1"
+
+REQUIRED_INSIGHTS_FIELDS = (
+    "summary",
+    "observed",
+    "hypotheses",
+    "experiments",
+    "cautions",
+)
+
+
+@dataclass
+class InsightsExplanation:
+    summary: str
+    observed: list[str] = field(default_factory=list)
+    hypotheses: list[str] = field(default_factory=list)
+    experiments: list[str] = field(default_factory=list)
+    cautions: list[str] = field(default_factory=list)
+    prompt_version: str = INSIGHTS_PROMPT_VERSION
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)

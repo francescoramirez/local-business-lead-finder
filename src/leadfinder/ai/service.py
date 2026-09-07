@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import json
 import re
 
 from leadfinder.ai.groq_provider import GroqProvider
-from leadfinder.ai.models import SalesPrepRequest, SalesPrepResult
+from leadfinder.ai.models import (
+    EXPERIMENT_PROMPT_VERSION,
+    INSIGHTS_PROMPT_VERSION,
+    InsightsExplanation,
+    SalesPrepRequest,
+    SalesPrepResult,
+)
 from leadfinder.ai.provider import AIProvider, groq_model
 from leadfinder.models import ManagedLead
 
@@ -84,3 +91,61 @@ def generate_sales_prep(
     assert_minimized(request.to_payload())
     engine = provider or GroqProvider(model=groq_model(model))
     return engine.generate_sales_prep(request)
+
+
+def _walk_keys(payload: object) -> list[str]:
+    found: list[str] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            found.append(str(key).lower())
+            found.extend(_walk_keys(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            found.extend(_walk_keys(item))
+    return found
+
+
+def assert_insights_minimized(payload: dict[str, object]) -> None:
+    keys = set(_walk_keys(payload))
+    forbidden = {
+        "place_id",
+        "phone",
+        "website",
+        "google_maps_url",
+        "html",
+        "notes",
+        "api_key",
+    }
+    overlap = keys & forbidden
+    if overlap:
+        raise ValueError("Insights payload must be aggregated metrics only.")
+    blob = json.dumps(payload, ensure_ascii=False)
+    lowered = blob.lower()
+    if "api_key" in lowered or "authorization" in lowered or _SECRET_HINT.search(blob):
+        raise ValueError("Insights payload must not include secrets.")
+    if "http://" in lowered or "https://" in lowered:
+        raise ValueError("Insights payload must not include URLs.")
+
+
+def generate_insights_explanation(
+    payload: dict[str, object],
+    *,
+    language: str,
+    model: str = "",
+    provider: AIProvider | None = None,
+    experiment: bool = False,
+) -> InsightsExplanation:
+    assert_insights_minimized(payload)
+    if provider is not None and hasattr(provider, "generate_insights"):
+        return provider.generate_insights(
+            payload,
+            language=language,
+            experiment=experiment,
+        )
+    engine = GroqProvider(model=groq_model(model))
+    return engine.generate_insights(
+        payload,
+        language=language,
+        prompt_version=EXPERIMENT_PROMPT_VERSION if experiment else INSIGHTS_PROMPT_VERSION,
+        experiment=experiment,
+    )
