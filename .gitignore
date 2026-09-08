@@ -29,6 +29,12 @@ packaging/file_version_info.txt
 htmlcov/
 coverage.xml
 
+# Local LeadFinder SQLite / logs (tests use pytest tmp_path, not repo fixtures)
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
 # Tool runtime output (may contain Google Maps content)
 output/
 cache/

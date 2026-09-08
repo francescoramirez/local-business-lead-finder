@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QLabel,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -29,7 +30,13 @@ class ProspectsPage(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.itemSelectionChanged.connect(self._emit)
+        hint = QLabel(
+            "Select a row to open workflow details on the Search tab "
+            "(status, priority, follow-up, undo)."
+        )
+        hint.setWordWrap(True)
         layout = QVBoxLayout(self)
+        layout.addWidget(hint)
         layout.addWidget(self.table)
 
     def _emit(self) -> None:

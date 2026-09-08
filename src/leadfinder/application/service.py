@@ -134,6 +134,43 @@ def apply_state(item: ManagedLead, state: LocalLeadState) -> ManagedLead:
     return item
 
 
+def managed_from_state(state: LocalLeadState) -> ManagedLead:
+    """Hydrate a persisted local lead for pipeline/details without a live search."""
+    has_website = state.website_status in {"has_website", "weak_website", "parked", "non_https"}
+    lead = Lead(
+        place_id=state.place_id,
+        name=state.label or state.place_id,
+        phone="",
+        website="",
+        website_status=state.website_status or "unknown",
+        address=state.source_location or "",
+        business_status="OPERATIONAL",
+        types="",
+        primary_type=state.business_preset or "",
+        google_maps_url="",
+        rating=None,
+        user_rating_count=None,
+        lead_score=state.opportunity_score or 0,
+        lead_reason="",
+        has_website=has_website,
+        contactable=state.has_phone,
+        operational=True,
+        source_query="",
+        source_location=state.source_location,
+        search_term="",
+        business_preset=state.business_preset,
+        place_type=state.business_preset,
+        country=state.country,
+        region=state.region,
+        fetched_at=state.last_seen_at or state.first_seen_at,
+        data_source="local",
+        presence_type=state.website_status or "unknown",
+        opportunity_score=state.opportunity_score,
+        opportunity_level=state.opportunity_level or "low",
+    )
+    return apply_state(ManagedLead(lead=lead, previously_seen=True), state)
+
+
 def merge_local_state(leads: list[Lead], store: LocalLeadStore) -> list[ManagedLead]:
     known = store.get_many([lead.place_id for lead in leads if lead.place_id])
     merged: list[ManagedLead] = []
@@ -479,6 +516,15 @@ class LeadService:
 
     def prospects(self) -> list[LocalLeadState]:
         return self.store.list_all()
+
+    def workspace_leads(self) -> list[ManagedLead]:
+        return [managed_from_state(state) for state in self.store.list_all()]
+
+    def managed_lead(self, place_id: str) -> ManagedLead | None:
+        state = self.store.get(place_id)
+        if state is None:
+            return None
+        return managed_from_state(state)
 
     def search_history(self) -> list[SearchRun]:
         return self.store.list_searches()

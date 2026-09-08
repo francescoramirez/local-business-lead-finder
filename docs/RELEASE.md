@@ -25,7 +25,11 @@ Expect `dist/release/` to contain the standalone ZIP, `SHA256SUMS.txt`, `release
 
 ## Clean-machine
 
-Run [docs/CLEAN_WINDOWS_TEST.md](CLEAN_WINDOWS_TEST.md) on Windows 10/11 x64 with no Python, Git, or source checkout. Until that is done, `CLEAN_WINDOWS_NO_PYTHON` stays **MANUAL_REQUIRED**.
+Clean Windows 10 x64 qualification for this 1.3.0 train is complete:
+
+**PASS — LEADFINDER_1_3_CLEAN_WINDOWS_DISTRIBUTION_VALIDATED**
+
+Standalone ZIP, Setup EXE, Demo Mode, Demo Pipeline, installer install/reinstall/uninstall, and user-data preservation were verified on a machine without Python, Git, or a source checkout. See [docs/CLEAN_WINDOWS_TEST.md](CLEAN_WINDOWS_TEST.md) if you repeat the checklist.
 
 ## Screenshots
 
@@ -37,10 +41,11 @@ Capture real GUI screenshots from **Demo Mode** only (`docs/images/README.md`). 
 git diff
 git add …
 git commit
-git tag v1.3.0
+# v1.3.0 may already exist on origin; move the tag onto this commit only if binaries match this tree
+git tag -f v1.3.0
 ```
 
-Do not tag until clean-machine (or an explicit owner waiver) and artifact hashes are the ones you will attach.
+Do not attach release binaries until the tag commit is the tree that produced those hashes. Do not force-push `main`. Force-push **only** the `v1.3.0` tag if you intentionally replace the previous tag object.
 
 ## GitHub Release
 

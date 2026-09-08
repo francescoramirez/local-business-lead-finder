@@ -21,6 +21,7 @@ All notable LeadFinder versions. Dates are omitted when they cannot be derived f
 ### Fixed
 
 - Developer `.env` is no longer loaded from the packaged install directory, so keys are not expected next to `LeadFinder.exe`.
+- Demo Pipeline loads persisted leads from the active workspace store instead of empty Search-session memory, so Demo Mode shows the seeded workflow board (New / Contacted / Interested / Follow-up / Won).
 
 ## 1.2.0
 

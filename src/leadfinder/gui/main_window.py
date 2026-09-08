@@ -884,7 +884,7 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl(self._selected.lead.google_maps_url))
 
     def _refresh_secondary(self) -> None:
-        self.pipeline_page.set_leads(self.model.leads())
+        self.pipeline_page.set_leads(self.service.workspace_leads())
         self.prospects_page.set_states(self.service.prospects())
         self.dashboard_page.refresh(
             self.service.dashboard(),
@@ -1113,15 +1113,21 @@ class MainWindow(QMainWindow):
         )
         export_report_dialog(self, self.service, report)
 
-    def _select_place(self, place_id: str) -> None:
+    def _resolve_managed(self, place_id: str) -> ManagedLead | None:
         for item in self.model.leads():
             if item.lead.place_id == place_id:
-                self._show_lead(item)
-                self.tabs.setCurrentIndex(0)
-                return
+                return item
+        return self.service.managed_lead(place_id)
+
+    def _select_place(self, place_id: str) -> None:
+        item = self._resolve_managed(place_id)
+        if item is None:
+            return
+        self._show_lead(item)
+        self.tabs.setCurrentIndex(0)
 
     def _on_pipeline_drop(self, place_id: str, status: str) -> None:
-        item = next((row for row in self.model.leads() if row.lead.place_id == place_id), None)
+        item = self._resolve_managed(place_id)
         if item is None:
             return
         updated = self.service.set_status(item, status)
@@ -1145,7 +1151,7 @@ class MainWindow(QMainWindow):
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def export_pipeline(self) -> None:
-        items = self.model.leads()
+        items = self.service.workspace_leads()
         if not items:
             QMessageBox.information(self, "Export", "There are no leads to export.")
             return

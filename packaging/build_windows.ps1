@@ -43,7 +43,8 @@ function Find-ISCC {
     if ($cmd) { return $cmd.Source }
     $paths = @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-        "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
     )
     foreach ($path in $paths) {
         if (Test-Path $path) { return $path }

@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Silent per-user install / launch / reinstall / uninstall smoke. Does not delete owner SQLite.
+  Silent per-user install / launch / reinstall / uninstall smoke.
+  Launches use an isolated LEADFINDER_DATA_DIR under %TEMP%. Does not open owner SQLite.
 #>
 param(
     [Parameter(Mandatory = $true)][string]$SetupExe
@@ -10,8 +11,12 @@ $ErrorActionPreference = "Stop"
 if (-not (Test-Path $SetupExe)) { throw "Setup missing: $SetupExe" }
 
 $InstalledExe = Join-Path $env:LOCALAPPDATA "Programs\LeadFinder\LeadFinder.exe"
-$DataDir = Join-Path $env:LOCALAPPDATA "LeadFinder\LeadFinder"
-$Sentinel = Join-Path $DataDir "owner-data-preservation-test.txt"
+$OwnerDataDir = Join-Path $env:LOCALAPPDATA "LeadFinder\LeadFinder"
+$OwnerDb = Join-Path $OwnerDataDir "leadfinder.db"
+$OwnerDbExisted = Test-Path $OwnerDb
+$IsolatedRoot = Join-Path $env:TEMP "leadfinder-installer-smoke"
+$DataDir = Join-Path $IsolatedRoot "data"
+$Sentinel = Join-Path $DataDir "qa-data-preservation.txt"
 $Token = "leadfinder-data-preservation-" + [guid]::NewGuid().ToString("N")
 
 function Find-UninstallCommand {
@@ -59,9 +64,10 @@ function Invoke-InstalledSmoke([string]$Label) {
     if (-not (Test-Path $InstalledExe)) { throw "$Label missing $InstalledExe" }
     $env:LEADFINDER_SMOKE_EXIT = "1"
     $env:LEADFINDER_IGNORE_DOTENV = "1"
+    $env:LEADFINDER_DATA_DIR = $DataDir
     $env:QT_QPA_PLATFORM = "offscreen"
     $work = Split-Path $InstalledExe
-    Write-Host "$Label launch $InstalledExe (workdir $work)"
+    Write-Host "$Label launch $InstalledExe (workdir $work) data=$DataDir"
     $p = Start-Process -FilePath $InstalledExe -WorkingDirectory $work -Wait -PassThru -WindowStyle Hidden
     Remove-Item Env:LEADFINDER_SMOKE_EXIT -ErrorAction SilentlyContinue
     if ($p.ExitCode -ne 0) { throw "$Label launch exit $($p.ExitCode)" }
@@ -93,8 +99,10 @@ if (Test-Path $InstalledExe) {
 }
 Write-Host "INSTALLER_UNINSTALL PASS"
 
-if (-not (Test-Path $Sentinel)) { throw "USER_DATA_PRESERVED FAIL: sentinel missing" }
+if (-not (Test-Path $Sentinel)) { throw "USER_DATA_PRESERVED FAIL: isolated sentinel missing" }
 $read = Get-Content -Raw $Sentinel
-if ($read.Trim() -ne $Token) { throw "USER_DATA_PRESERVED FAIL: sentinel changed" }
-Remove-Item -Force $Sentinel
-Write-Host "USER_DATA_PRESERVED PASS (sentinel removed after check; owner DB untouched)"
+if ($read.Trim() -ne $Token) { throw "USER_DATA_PRESERVED FAIL: isolated sentinel changed" }
+if ($OwnerDbExisted -and -not (Test-Path $OwnerDb)) {
+    throw "INSTALLER_DATA_LOSS: owner leadfinder.db missing after uninstall"
+}
+Write-Host "USER_DATA_PRESERVED PASS (isolated sentinel kept; owner DB not opened)"

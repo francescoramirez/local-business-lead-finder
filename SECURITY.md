@@ -4,8 +4,6 @@ LeadFinder stores data on the local machine. API keys are read from the environm
 
 ## Reporting
 
-## Reporting
-
 Do not open a public issue that includes secrets, API keys, or personal data.
 
 Use GitHub private vulnerability reporting if it is enabled on the repository. Otherwise open a public issue that describes the class of problem only (no keys, tokens, or customer data).

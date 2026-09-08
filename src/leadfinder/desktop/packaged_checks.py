@@ -134,12 +134,23 @@ def _check_demo() -> dict[str, Any]:
     apply_qt_identity(app)
     store = LocalLeadStore(demo)
     window = MainWindow(LeadService(store))
+    prospects = window.prospects_page.table.rowCount()
+    pipeline_cards = sum(column.count() for column in window.pipeline_page.columns.values())
     window.close()
     store.close()
     after = (owner_db.exists(), owner_db.stat().st_mtime_ns if owner_db.exists() else 0)
     if before != after:
         return _fail("owner leadfinder.db changed during demo packaged test")
-    return _ok(demo_exists=demo.exists(), demo_name=demo.name)
+    if prospects < 60:
+        return _fail(f"demo prospects empty or too small: {prospects}")
+    if pipeline_cards < 1:
+        return _fail("demo pipeline had zero cards after load")
+    return _ok(
+        demo_exists=demo.exists(),
+        demo_name=demo.name,
+        prospects=prospects,
+        pipeline_cards=pipeline_cards,
+    )
 
 
 def _check_keyring() -> dict[str, Any]:
